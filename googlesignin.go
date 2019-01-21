@@ -96,6 +96,7 @@ func (c *cachedKeySet) Get() (*jose.JSONWebKeySet, error) {
 	return c.keys, nil
 }
 
+// Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
 	// If set, the Google accounts must belong to this domain. See:
 	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param

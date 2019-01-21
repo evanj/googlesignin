@@ -12,10 +12,6 @@ import (
 // ClientID is a fake OAuth client ID to be used with googlesignin.Authenticator in tests.
 const ClientID = "insecure_test_client_id"
 
-// ClientSecret is a fake client secret that is not used. However this mirrors ClientID, so makes
-// using this package more readable.
-const ClientSecret = "insecure_test_client_secret"
-
 // generated with gopkg.in/square/go-jose.v2/jwk-keygen
 const insecurePrivateKey = `{"use":"sig","kty":"EC","crv":"P-256","alg":"ES256","x":"-YdsjSFTEqKWQn7ZjThmkhuDDSasgh3ACWmgFKlo_7w","y":"LejdIY1pMKjXRlf3lStziDpQGPOynW49uF_Jlymcaxg","d":"xK_dS2q20mgRrYFVlwcJHOlNWmVxneJyzWFO-CGZ0BE"}`
 const testKeyID = "testkeyid"

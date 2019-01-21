@@ -85,7 +85,7 @@ func TestCachedKeys(t *testing.T) {
 }
 
 func TestMakePublic(t *testing.T) {
-	a := New("clientid", "clientsecret", "/loggedin")
+	a := New("clientid", "/loggedin")
 	a.MakePublic("/")
 	a.MakePublic("/public")
 	a.MakePublic("/publicdir/")

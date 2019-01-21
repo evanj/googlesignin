@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -16,15 +17,20 @@ import (
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
-const cookieName = "_bc_id"
+const cookieName = "_goog_id"
 const minCacheSeconds = 60
 const defaultSignInPath = "/__start_signin"
 
 // https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
 const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
-const googleIssuer = "accounts.google.com"
+
+// Issuer is the value of the issuer field (iss) in Google's OpenID tokens.
+const Issuer = "accounts.google.com"
 
 var maxAgePattern = regexp.MustCompile(`(?:,|^)\s*(?i:max-age)\s*=\s*([^\s,]+)`)
+
+// ErrKeyNotFound is the error returned by KeySet.Get when the key ID is not found.
+var ErrKeyNotFound = errors.New("key not found")
 
 type contextKey int
 
@@ -65,7 +71,20 @@ func parseMaxAge(cacheControl string) int {
 	return parsedSeconds
 }
 
-func (c *cachedKeySet) Get() (*jose.JSONWebKeySet, error) {
+func (c *cachedKeySet) Get(keyID string) (*jose.JSONWebKey, error) {
+	set, err := c.getKeySet()
+	if err != nil {
+		return nil, err
+	}
+
+	keys := set.Key(keyID)
+	if len(keys) > 0 {
+		return &keys[0], nil
+	}
+	return nil, ErrKeyNotFound
+}
+
+func (c *cachedKeySet) getKeySet() (*jose.JSONWebKeySet, error) {
 	if c.keys != nil && time.Now().Before(c.expires) {
 		return c.keys, nil
 	}
@@ -96,6 +115,13 @@ func (c *cachedKeySet) Get() (*jose.JSONWebKeySet, error) {
 	return c.keys, nil
 }
 
+// KeySet retrieves keys in JWK format to validate tokens.
+type KeySet interface {
+	// Get returns the key matching keyID, or an error indicating what happened. Must return
+	// ErrKeyNotFound if the key does not exist.
+	Get(keyID string) (*jose.JSONWebKey, error)
+}
+
 // Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
 	// If set, the Google accounts must belong to this domain. See:
@@ -106,11 +132,12 @@ type Authenticator struct {
 	// If true, users will be redirected to log in if they are not. Otherwise they get a failed
 	// response.
 	RedirectIfNotSignedIn bool
+	// Gets keys to validate tokens. Should not be changed except in tests.
+	CachedKeys KeySet
 
 	clientID     string
 	clientSecret string
 	signedInPath string
-	googleKeySet cachedKeySet
 	publicPaths  map[string]bool
 }
 
@@ -120,8 +147,8 @@ type Authenticator struct {
 func New(clientID string, clientSecret string, signedInPath string) *Authenticator {
 	return &Authenticator{
 		"", defaultSignInPath, false,
+		&cachedKeySet{googleJWKURL, nil, time.Time{}},
 		clientID, clientSecret, signedInPath,
-		cachedKeySet{googleJWKURL, nil, time.Time{}},
 		make(map[string]bool),
 	}
 }
@@ -142,21 +169,26 @@ func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) 
 	buf.WriteTo(w)
 }
 
-type googleExtraClaims struct {
+// ExtraClaims stores the JSON for Google Sign-In's extra claims that are not included in the
+// basic OpenID claims.
+type ExtraClaims struct {
 	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param
 	HostedDomain string `json:"hd,omitempty"`
 	Email        string `json:"email,omitempty"`
 }
 
-func findKey(keySet *jose.JSONWebKeySet, token *jwt.JSONWebToken) *jose.JSONWebKey {
+func findKey(keys KeySet, token *jwt.JSONWebToken) (*jose.JSONWebKey, error) {
 	for _, header := range token.Headers {
-		keys := keySet.Key(header.KeyID)
-		fmt.Println(header.KeyID, keys)
-		if len(keys) > 0 {
-			return &keys[0]
+		key, err := keys.Get(header.KeyID)
+		if err == ErrKeyNotFound {
+			continue
 		}
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
 	}
-	return nil
+	return nil, ErrKeyNotFound
 }
 
 // GetEmail returns the email for a given request, or an error describing what went wrong. The
@@ -177,16 +209,12 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	}
 
 	// validate the token and get the claims
-	keySet, err := a.googleKeySet.Get()
+	key, err := findKey(a.CachedKeys, token)
 	if err != nil {
 		return "", err
 	}
-	key := findKey(keySet, token)
-	if key == nil {
-		return "", fmt.Errorf("could not find key for token")
-	}
 	standardClaims := &jwt.Claims{}
-	extraClaims := &googleExtraClaims{}
+	extraClaims := &ExtraClaims{}
 	err = token.Claims(key, standardClaims, extraClaims)
 	if err != nil {
 		return "", err
@@ -194,7 +222,7 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	fmt.Println(standardClaims, extraClaims)
 	err = standardClaims.Validate(jwt.Expected{
 		Audience: jwt.Audience{a.clientID},
-		Issuer:   googleIssuer,
+		Issuer:   Issuer,
 		Time:     time.Now(),
 	})
 	if err != nil {
@@ -265,6 +293,17 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		rWithContext := r.WithContext(ctxAuthenticated)
 		handler.ServeHTTP(w, rWithContext)
 	})
+}
+
+// InsecureMakeAuthenticated makes a new *http.Request that authenticated. It copies r then
+// sets token in the correct cookie, and marks the request as valid for MustGetEmail. This should
+// only be called by tests.
+func InsecureMakeAuthenticated(r *http.Request, token string) *http.Request {
+	ctxAuthenticated := context.WithValue(r.Context(), authenticatorKey, authenticatorKey)
+	rWithContext := r.WithContext(ctxAuthenticated)
+	rWithContext.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	return rWithContext
+
 }
 
 // MakePublic makes path accessible without signing in. This does path matching, unlike ServeMux,

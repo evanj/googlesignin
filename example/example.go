@@ -44,6 +44,7 @@ var pageTemplate = template.Must(template.New("page1").Parse(`<!doctype html><ht
 
 type server struct {
 	authenticator *googlesignin.Authenticator
+	handler       http.Handler
 }
 
 func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,24 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func newServer(clientID string, clientSecret string) *server {
+	authenticator := googlesignin.New(clientID, clientSecret, "/")
+	authenticator.RedirectIfNotSignedIn = true
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleRoot)
+	s := &server{authenticator, nil}
+	mux.HandleFunc("/page1", s.handlePage)
+	mux.HandleFunc("/page2", s.handlePage)
+
+	s.handler = authenticator.RequireSignIn(mux)
+	authenticator.MakePublic("/")
+	// Returns 404, but that is better than redirecting
+	authenticator.MakePublic("/favicon.ico")
+
+	return s
 }
 
 func main() {
@@ -72,19 +91,6 @@ func main() {
 		panic("must specify Google Client ID with environment variable " + clientIDEnvVar)
 	}
 
-	authenticator := googlesignin.New(clientID, clientSecret, "/")
-	authenticator.RedirectIfNotSignedIn = true
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRoot)
-	s := &server{authenticator}
-	mux.HandleFunc("/page1", s.handlePage)
-	mux.HandleFunc("/page2", s.handlePage)
-
-	authenticatedHandler := authenticator.RequireSignIn(mux)
-	authenticator.MakePublic("/")
-	// Returns 404, but that is better than redirecting
-	authenticator.MakePublic("/favicon.ico")
-
-	log.Fatal(http.ListenAndServe(":"+port, authenticatedHandler))
+	s := newServer(clientID, clientSecret)
+	log.Fatal(http.ListenAndServe(":"+port, s.handler))
 }

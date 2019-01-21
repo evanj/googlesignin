@@ -5,11 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
 
 	"github.com/evanj/googlesignin"
 	"github.com/evanj/googlesignin/signintest"
-
-	"testing"
 )
 
 const insecureTestDomain = "example.com"
@@ -22,7 +21,7 @@ type fixture struct {
 
 func newFixture() *fixture {
 	f := &fixture{
-		googlesignin.New(signintest.ClientID, signintest.ClientSecret, "/loggedin"),
+		googlesignin.New(signintest.ClientID, "/loggedin"),
 		nil,
 	}
 	f.a.HostedDomain = insecureTestDomain

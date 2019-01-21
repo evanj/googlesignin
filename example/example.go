@@ -55,8 +55,8 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func newServer(clientID string, clientSecret string) *server {
-	authenticator := googlesignin.New(clientID, clientSecret, "/")
+func newServer(clientID string) *server {
+	authenticator := googlesignin.New(clientID, "/")
 	authenticator.RedirectIfNotSignedIn = true
 
 	mux := http.NewServeMux()
@@ -85,12 +85,6 @@ func main() {
 		panic("must specify Google Client ID with environment variable " + clientIDEnvVar)
 	}
 
-	const clientSecretEnvVar = "CLIENT_SECRET"
-	clientSecret := os.Getenv(clientSecretEnvVar)
-	if clientSecret == "" {
-		panic("must specify Google Client ID with environment variable " + clientIDEnvVar)
-	}
-
-	s := newServer(clientID, clientSecret)
+	s := newServer(clientID)
 	log.Fatal(http.ListenAndServe(":"+port, s.handler))
 }

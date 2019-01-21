@@ -15,4 +15,4 @@ To run it yourself:
 
 1. Create a new Google Sign-In OAuth client ID and secret. [Follow Google's instructions to do this](https://developers.google.com/identity/sign-in/web/sign-in#before_you_begin).
 2. Configure the OAuth client to permit `https://YOURDOMAIN` as an *Authorized JavaScript origin* and `https://YOURDOMAIN/__start_signin` as an *Authorized redirect URI*.
-3. `CLIENT_ID=YOURID CLIENT_SECRET=YOURSECET go run github.com/evanj/googlesignin/example`
+3. `CLIENT_ID=YOURID go run github.com/evanj/googlesignin/example`

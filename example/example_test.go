@@ -12,7 +12,7 @@ import (
 
 // A demonstration of how to test handlers using googlesignin.
 func TestAuthenticatedRequest(t *testing.T) {
-	s := newServer(signintest.ClientID, signintest.ClientSecret)
+	s := newServer(signintest.ClientID)
 	testAuth := signintest.InsecureTestAuthenticator(s.authenticator)
 
 	r := httptest.NewRequest(http.MethodGet, "/page1", nil)

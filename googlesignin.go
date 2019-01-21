@@ -136,7 +136,6 @@ type Authenticator struct {
 	CachedKeys KeySet
 
 	clientID     string
-	clientSecret string
 	signedInPath string
 	publicPaths  map[string]bool
 }
@@ -144,11 +143,11 @@ type Authenticator struct {
 // New creates a new Authenticator, configured with the provided OAuth configuration. The
 // middleware will serve the page to start the sign in publicly at signInPath. Once successful,
 // it will redirect back to signedInPath.
-func New(clientID string, clientSecret string, signedInPath string) *Authenticator {
+func New(clientID string, signedInPath string) *Authenticator {
 	return &Authenticator{
 		"", defaultSignInPath, false,
 		&cachedKeySet{googleJWKURL, nil, time.Time{}},
-		clientID, clientSecret, signedInPath,
+		clientID, signedInPath,
 		make(map[string]bool),
 	}
 }

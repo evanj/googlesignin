@@ -2,6 +2,7 @@
 package googlesignin
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -111,5 +112,17 @@ func TestMakePublic(t *testing.T) {
 		if a.isPublic(notPublicPath) {
 			t.Errorf("%d: isPublic(%#v) should be false", i, notPublicPath)
 		}
+	}
+}
+
+func TestClaimsJSON(t *testing.T) {
+	// sanity check the json tags so we don't forget them
+	extraClaims := &ExtraClaims{"domain", "email"}
+	output, err := json.Marshal(extraClaims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != `{"hd":"domain","email":"email"}` {
+		t.Error(string(output))
 	}
 }

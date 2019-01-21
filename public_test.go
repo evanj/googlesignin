@@ -2,7 +2,6 @@
 package googlesignin_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,13 +43,6 @@ func TestGetEmail(t *testing.T) {
 	email, err = f.a.GetEmail(r)
 	if !(email == "user@example.com" && err == nil) {
 		t.Error("expected success", email, err)
-	}
-
-	// sanity check the json tags
-	extraClaims := &googlesignin.ExtraClaims{"domain", "email"}
-	output, err := json.Marshal(extraClaims)
-	if string(output) != `{"hd":"domain","email":"email"}` {
-		t.Error(string(output))
 	}
 }
 

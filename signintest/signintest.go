@@ -9,9 +9,11 @@ import (
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
+// ClientID is a fake OAuth client ID to be used with googlesignin.Authenticator in tests.
 const ClientID = "insecure_test_client_id"
 
-// This fake secret is not used, but it makes the uses of this package more readable.
+// ClientSecret is a fake client secret that is not used. However this mirrors ClientID, so makes
+// using this package more readable.
 const ClientSecret = "insecure_test_client_secret"
 
 // generated with gopkg.in/square/go-jose.v2/jwk-keygen
@@ -24,8 +26,8 @@ type RequestAuthenticator struct {
 	privateKey    jose.JSONWebKey
 }
 
-// InsecureAuthenticate makes request an authenticated request, using the insecure test keys. It
-// will then be accepted by handlers that use MustGetEmail
+// InsecureMakeAuthenticated makes request an authenticated request, using the insecure test keys.
+// It will then be accepted by handlers that use MustGetEmail
 func (r *RequestAuthenticator) InsecureMakeAuthenticated(
 	request *http.Request, email string,
 ) *http.Request {

@@ -23,9 +23,13 @@ const defaultSignInPath = "/__start_signin"
 
 // https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
 const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
+
+// Issuer is the value of the issuer field (iss) in Google's OpenID tokens.
 const Issuer = "accounts.google.com"
 
 var maxAgePattern = regexp.MustCompile(`(?:,|^)\s*(?i:max-age)\s*=\s*([^\s,]+)`)
+
+// ErrKeyNotFound is the error returned by KeySet.Get when the key ID is not found.
 var ErrKeyNotFound = errors.New("key not found")
 
 type contextKey int

@@ -96,6 +96,7 @@ func (c *cachedKeySet) Get() (*jose.JSONWebKeySet, error) {
 	return c.keys, nil
 }
 
+// Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
 	// If set, the Google accounts must belong to this domain. See:
 	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param
@@ -127,7 +128,7 @@ func New(clientID string, clientSecret string, signedInPath string) *Authenticat
 
 // Renders the Google sign-in page, which will eventually set the ID token cookie and redirect
 // the user to LoggedInPath.
-func (a *Authenticator) StartSignInPage(w http.ResponseWriter, r *http.Request) {
+func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) {
 	data := &signInValues{a.clientID, a.signedInPath, cookieName, a.HostedDomain}
 	buf := &bytes.Buffer{}
 	err := signInTemplate.Execute(buf, data)
@@ -158,8 +159,8 @@ func findKey(keySet *jose.JSONWebKeySet, token *jwt.JSONWebToken) *jose.JSONWebK
 	return nil
 }
 
-// Returns the email for a given request, or an error describing what went wrong. The error
-// messages report details about what went wrong, and should not be returned to the client.
+// GetEmail returns the email for a given request, or an error describing what went wrong. The
+// error reports details about what went wrong, and should not be returned to the client.
 // However, they will not leak truly private data (e.g. the token, client secret, etc).
 func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	// Parse the ID token from the cookie
@@ -212,7 +213,8 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	return extraClaims.Email, nil
 }
 
-// The request must have been served by RequiresLogin.
+// MustGetEmail returns the authenticated user's email address, or panics if the user is not signed
+// in. The request must have been served by RequiresSignIn.
 func (a *Authenticator) MustGetEmail(r *http.Request) string {
 	// Verify that this request passed through our middleware. This prevents errors where we
 	// might try to use this in a code path that was not properly authenticated.
@@ -227,7 +229,8 @@ func (a *Authenticator) MustGetEmail(r *http.Request) string {
 	return email
 }
 
-// Requires a user to have signed in, or fails the request with permission denied.
+// RequireSignIn wraps an existing http.Handler to require a user to be signed in. It will fail
+// the request, or will redirect the user to sign in.
 func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.isPublic(r.URL.Path) {
@@ -237,7 +240,7 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		}
 		if r.URL.Path == a.SignInPath {
 			// serve the sign in page
-			a.StartSignInPage(w, r)
+			a.startSignInPage(w, r)
 			return
 		}
 
@@ -260,9 +263,9 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 	})
 }
 
-// Makes path publicly accessible. This does exact path matching, unlike ServeMux, so "/" only
-// permits the root page, and "/dir/" only permits the exact path "/dir/". It is currently not
-// possible to permit subdirectories.
+// MakePublic makes path accessible without signing in. This does path matching, unlike ServeMux,
+// so "/" only permits the root page, and "/dir/" only permits the exact path "/dir/". It is
+// currently not possible to permit subdirectories or any kind of pattern.
 func (a *Authenticator) MakePublic(path string) {
 	a.publicPaths[path] = true
 }

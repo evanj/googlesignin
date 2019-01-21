@@ -247,9 +247,13 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		// requires authentication
 		_, err := a.GetEmail(r)
 		if err != nil {
-			log.Printf("not authenticated: %s", err.Error())
-			if a.RedirectIfNotSignedIn {
-				http.Redirect(w, r, a.SignInPath, http.StatusSeeOther)
+			log.Printf("%s: not authenticated: %s", r.URL.String(), err.Error())
+			if r.Method == http.MethodGet && a.RedirectIfNotSignedIn {
+				redirectPath := a.SignInPath + "#" + r.URL.Path
+				if r.URL.RawQuery != "" {
+					redirectPath += "?" + r.URL.RawQuery
+				}
+				http.Redirect(w, r, redirectPath, http.StatusSeeOther)
 			} else {
 				http.Error(w, "forbidden", http.StatusForbidden)
 			}
@@ -287,6 +291,30 @@ var signInTemplate = template.Must(template.New("signin").Parse(`<!doctype html>
 <script>
 function init() {
   gapi.load('auth2', function() {
+		const sessionStorageKey = "__after_redirect";
+
+		// Returns the path we should redirect BACK to, if we are authenticated, or the empty string.
+		function getRedirect() {
+		  const hash = window.location.hash;
+			if (hash[0] === "/") {
+				return hash;
+			}
+
+			const sessionRedirect = sessionStorage.getItem(sessionStorageKey);
+			if (sessionRedirect !== null && sessionRedirect[0] === "/") {
+				sessionStorage.removeItem(sessionStorageKey);
+				return sessionRedirect;
+			}
+
+			return "{{.LoggedInRedirect}}";
+		}
+
+		function saveRedirectFromHash() {
+			const hash = window.location.hash;
+			if (hash[0] === "/") {
+				sessionStorage.setItem(sessionStorageKey, hash);
+			}
+		}
 
     const initPromise = gapi.auth2.init({
       client_id: "{{.ClientID}}",
@@ -302,12 +330,15 @@ function init() {
         const response = user.getAuthResponse();
         document.cookie = "{{.CookieName}}=" + response.id_token +
           ";path=/;samesite=lax;max-age=" + response.expires_in;
-        window.location = "{{.LoggedInRedirect}}";
+
+        window.location = getRedirect();
       } else {
+      	saveRedirectFromHash();
+
         const signInPromise = auth.signIn();
         signInPromise.then(function(user) {
-          console.log("signed in user:", user);
           // TODO: We are using redirect; we should not get here?
+          window.location = getRedirect();
         }).catch(function (e){
           console.log("error", e);
         });

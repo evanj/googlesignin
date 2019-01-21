@@ -192,7 +192,7 @@ func TestAuthenticatedHandler(t *testing.T) {
 
 	// request failed: not permitted
 	recorder := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/hello", nil)
+	r := httptest.NewRequest(http.MethodGet, "/hello?param=1", nil)
 	authenticatedHandler.ServeHTTP(recorder, r)
 	if recorder.Code != http.StatusForbidden {
 		t.Error("expected Forbidden:", recorder.Code)
@@ -201,13 +201,19 @@ func TestAuthenticatedHandler(t *testing.T) {
 		t.Error("handler should not have been called:", calledRequest)
 	}
 
-	// enable redirects: should now be redirected
+	// enable redirects: GET should now be redirected; POST should fail
 	f.a.RedirectIfNotSignedIn = true
 	recorder = httptest.NewRecorder()
 	authenticatedHandler.ServeHTTP(recorder, r)
 	location := recorder.Header().Get("Location")
-	if calledRequest != nil || !(recorder.Code == http.StatusSeeOther && location == defaultSignInPath) {
+	if calledRequest != nil || !(recorder.Code == http.StatusSeeOther && location == defaultSignInPath+"#/hello?param=1") {
 		t.Error("expected redirect:", recorder.Code, location)
+	}
+	postR := httptest.NewRequest(http.MethodPost, "/hello", nil)
+	recorder = httptest.NewRecorder()
+	authenticatedHandler.ServeHTTP(recorder, postR)
+	if calledRequest != nil || recorder.Code != http.StatusForbidden {
+		t.Error("expected forbidden:", recorder.Code)
 	}
 
 	// make hello public: should be permitted

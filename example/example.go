@@ -22,7 +22,6 @@ const rootHTML = `<!doctype html><html><head>
 </body></html>`
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
-	log.Println("wtf")
 	if r.URL.Path != "/" {
 		log.Printf("root returning 404 for %s", r.URL.String())
 		http.NotFound(w, r)

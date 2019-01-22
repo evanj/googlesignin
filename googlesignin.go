@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/appengine"
+	"google.golang.org/appengine/urlfetch"
 	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
@@ -84,12 +86,27 @@ func (c *cachedKeySet) Get(keyID string) (*jose.JSONWebKey, error) {
 	return nil, ErrKeyNotFound
 }
 
+// TODO: Remove! This isn't even guaranteed to work due to a race, but its good enough for now.
+var legacyAppEngineHackClient = http.DefaultClient
+var hackForLegacyAppEngine = func(r *http.Request) {}
+
+// EnableLegacyAppEngineHack makes this barely work with go1.9. It replaces a module-level client
+// with the App Engine urlfetch client. This has a horrible race condition and should not be used
+// for critical applications. It only exists to make it easier to port an application to Go 1.11.
+// TODO: Remove this.
+func EnableLegacyAppEngineHack() {
+	hackForLegacyAppEngine = func(r *http.Request) {
+		ctx := appengine.NewContext(r)
+		legacyAppEngineHackClient = urlfetch.Client(ctx)
+	}
+}
+
 func (c *cachedKeySet) getKeySet() (*jose.JSONWebKeySet, error) {
 	if c.keys != nil && time.Now().Before(c.expires) {
 		return c.keys, nil
 	}
 
-	resp, err := http.Get(c.sourceURL)
+	resp, err := legacyAppEngineHackClient.Get(c.sourceURL)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +157,7 @@ type Authenticator struct {
 	publicPaths  map[string]bool
 }
 
-// New creates a new Authenticator, configured with the provided OAuth configuration. The
+// New creates an Authenticator, configured with the provided OAuth configuration. The
 // middleware will serve the page to start the sign in publicly at signInPath. Once successful,
 // it will redirect back to signedInPath.
 func New(clientID string, signedInPath string) *Authenticator {
@@ -272,6 +289,7 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		}
 
 		// requires authentication
+		hackForLegacyAppEngine(r)
 		_, err := a.GetEmail(r)
 		if err != nil {
 			log.Printf("%s: not authenticated: %s", r.URL.String(), err.Error())

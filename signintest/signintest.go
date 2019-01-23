@@ -27,8 +27,8 @@ type RequestAuthenticator struct {
 func (r *RequestAuthenticator) InsecureMakeAuthenticated(
 	request *http.Request, email string,
 ) *http.Request {
-	token := makeSignedToken(&r.privateKey, email, r.authenticator.HostedDomain)
-	return googlesignin.InsecureMakeAuthenticated(request, token)
+	idToken := makeSignedToken(&r.privateKey, email, r.authenticator.HostedDomain)
+	return googlesignin.InsecureMakeAuthenticated(request, idToken, "fake_access_token")
 }
 
 type staticKeySet struct {

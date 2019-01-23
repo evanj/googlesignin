@@ -13,6 +13,8 @@ import (
 	"github.com/evanj/googlesignin"
 )
 
+const googleTokenInfoURL = "https://oauth2.googleapis.com/tokeninfo"
+
 const rootHTML = `<!doctype html><html><head>
 <title>Google Sign-In Example</title>
 </head>
@@ -57,6 +59,7 @@ var pageTemplate = template.Must(template.New("page1").Parse(`<!doctype html><ht
 type server struct {
 	authenticator *googlesignin.Authenticator
 	handler       http.Handler
+	tokenInfoURL  string
 }
 
 func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +77,7 @@ func (s *server) accessTokenPage(w http.ResponseWriter, r *http.Request) {
 	}
 	params := url.Values{}
 	params.Set("access_token", accessToken)
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?" + params.Encode())
+	resp, err := http.Get(s.tokenInfoURL + "?" + params.Encode())
 	if err != nil {
 		panic(err)
 	}
@@ -103,7 +106,7 @@ func newServer(clientID string) *server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleRoot)
-	s := &server{authenticator, nil}
+	s := &server{authenticator, nil, googleTokenInfoURL}
 	mux.HandleFunc("/page1", s.handlePage)
 	mux.HandleFunc("/page2", s.handlePage)
 	mux.HandleFunc("/tokeninfo", s.accessTokenPage)

@@ -19,9 +19,12 @@ import (
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
-const cookieName = "_goog_id"
+const idTokenCookieName = "__id"
+const accessTokenCookieName = "__access"
 const minCacheSeconds = 60
 const defaultSignInPath = "/__start_signin"
+const defaultScopes = "openid email"
+const defaultSecureCookie = "secure;"
 
 // https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
 const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
@@ -141,6 +144,9 @@ type KeySet interface {
 
 // Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
+	// Space-separated OAuth scopes to be appended. By default we request "openid email". See:
+	// https://developers.google.com/identity/protocols/googlescopes
+	ExtraScopes string
 	// If set, the Google accounts must belong to this domain. See:
 	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param
 	HostedDomain string
@@ -149,12 +155,14 @@ type Authenticator struct {
 	// If true, users will be redirected to log in if they are not. Otherwise they get a failed
 	// response.
 	RedirectIfNotSignedIn bool
+
 	// Gets keys to validate tokens. Should not be changed except in tests.
 	CachedKeys KeySet
 
-	clientID     string
-	signedInPath string
-	publicPaths  map[string]bool
+	clientID           string
+	signedInPath       string
+	publicPaths        map[string]bool
+	secureCookieOption string
 }
 
 // New creates an Authenticator, configured with the provided OAuth configuration. The
@@ -162,17 +170,25 @@ type Authenticator struct {
 // it will redirect back to signedInPath.
 func New(clientID string, signedInPath string) *Authenticator {
 	return &Authenticator{
-		"", defaultSignInPath, false,
+		defaultScopes, "", defaultSignInPath, false,
 		&cachedKeySet{googleJWKURL, nil, time.Time{}},
 		clientID, signedInPath,
-		make(map[string]bool),
+		make(map[string]bool), defaultSecureCookie,
 	}
+}
+
+// InsecureCookies configures the Authenticator to send cookies over HTTP connections. This should
+// only be used for localhost testing. In other cases, you should only send the cookie over HTTPS
+// since it contains sensitive user data.
+func (a *Authenticator) InsecureCookies() {
+	a.secureCookieOption = ""
 }
 
 // Renders the Google sign-in page, which will eventually set the ID token cookie and redirect
 // the user to LoggedInPath.
 func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) {
-	data := &signInValues{a.clientID, a.signedInPath, cookieName, a.HostedDomain}
+	data := &signInValues{a.clientID, a.signedInPath, idTokenCookieName, accessTokenCookieName,
+		defaultScopes + " " + a.ExtraScopes, a.HostedDomain, a.secureCookieOption}
 	buf := &bytes.Buffer{}
 	err := signInTemplate.Execute(buf, data)
 	if err != nil {
@@ -207,12 +223,11 @@ func findKey(keys KeySet, token *jwt.JSONWebToken) (*jose.JSONWebKey, error) {
 	return nil, ErrKeyNotFound
 }
 
-// GetEmail returns the email for a given request, or an error describing what went wrong. The
-// error reports details about what went wrong, and should not be returned to the client.
-// However, they will not leak truly private data (e.g. the token, client secret, etc).
+// GetEmail returns the email for a request. The error reports details that should not be returned
+// to the client. However, it will not leak truly private data (e.g. the token).
 func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	// Parse the ID token from the cookie
-	cookie, err := r.Cookie(cookieName)
+	cookie, err := r.Cookie(idTokenCookieName)
 	if err == http.ErrNoCookie {
 		return "", fmt.Errorf("no ID token cookie found")
 	}
@@ -255,6 +270,16 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	}
 
 	return extraClaims.Email, nil
+}
+
+// GetAccessToken returns the access token for a request. The error reports details that should not
+// be returned to the client. However, it will not leak truly private data (e.g. the token).
+func (a *Authenticator) GetAccessToken(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(accessTokenCookieName)
+	if err != nil {
+		return "", err
+	}
+	return cookie.Value, nil
 }
 
 // MustGetEmail returns the authenticated user's email address, or panics if the user is not signed
@@ -318,9 +343,8 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 func InsecureMakeAuthenticated(r *http.Request, token string) *http.Request {
 	ctxAuthenticated := context.WithValue(r.Context(), authenticatorKey, authenticatorKey)
 	rWithContext := r.WithContext(ctxAuthenticated)
-	rWithContext.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	rWithContext.AddCookie(&http.Cookie{Name: idTokenCookieName, Value: token})
 	return rWithContext
-
 }
 
 // MakePublic makes path accessible without signing in. This does path matching, unlike ServeMux,
@@ -335,10 +359,13 @@ func (a *Authenticator) isPublic(path string) bool {
 }
 
 type signInValues struct {
-	ClientID         string
-	LoggedInRedirect string
-	CookieName       string
-	HostedDomain     string
+	ClientID              string
+	LoggedInRedirect      string
+	IDTokenCookieName     string
+	AccessTokenCookieName string
+	Scopes                string
+	HostedDomain          string
+	SecureCookieOption    string
 }
 
 var signInTemplate = template.Must(template.New("signin").Parse(`<!doctype html><html><head>
@@ -346,12 +373,12 @@ var signInTemplate = template.Must(template.New("signin").Parse(`<!doctype html>
 <script src="https://apis.google.com/js/platform.js?onload=init" async defer></script>
 <script>
 function init() {
-  gapi.load('auth2', function() {
+	gapi.load('auth2', function() {
 		const sessionStorageKey = "__after_redirect";
 
 		// Returns the path we should redirect BACK to, if we are authenticated, or the empty string.
 		function getRedirect() {
-		  const hash = window.location.hash;
+			const hash = window.location.hash;
 			if (hash[0] === "/") {
 				return hash;
 			}
@@ -372,37 +399,42 @@ function init() {
 			}
 		}
 
-    const initPromise = gapi.auth2.init({
-      client_id: "{{.ClientID}}",
-      scope: "email",
-      fetch_basic_profile: false,
-      hosted_domain: "{{.HostedDomain}}",
-      ux_mode: "redirect",
-    });
+		function handleSignedIn(user) {
+			const response = user.getAuthResponse();
+			document.cookie = "{{.IDTokenCookieName}}=" + response.id_token +
+				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
+			document.cookie = "{{.AccessTokenCookieName}}=" + response.access_token +
+				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
+			window.location = getRedirect();
+		}
 
-    initPromise.then(function(auth) {
-      if (auth.isSignedIn.get()) {
-        const user = auth.currentUser.get();
-        const response = user.getAuthResponse();
-        document.cookie = "{{.CookieName}}=" + response.id_token +
-          ";path=/;samesite=lax;max-age=" + response.expires_in;
+		const initPromise = gapi.auth2.init({
+			client_id: "{{.ClientID}}",
+			scope: "{{.Scopes}}",
+			fetch_basic_profile: false,
+			hosted_domain: "{{.HostedDomain}}",
+			ux_mode: "redirect",
+		});
 
-        window.location = getRedirect();
-      } else {
-      	saveRedirectFromHash();
+		initPromise.then(function(auth) {
+			if (auth.isSignedIn.get()) {
+				const user = auth.currentUser.get();
+				handleSignedIn(user);
+			} else {
+				saveRedirectFromHash();
 
-        const signInPromise = auth.signIn();
-        signInPromise.then(function(user) {
-          // TODO: We are using redirect; we should not get here?
-          window.location = getRedirect();
-        }).catch(function (e){
-          console.log("error", e);
-        });
-      }
-    }).catch(function(e){
-    	console.log("google auth error", e);
-    });
-  });
+				const signInPromise = auth.signIn();
+				signInPromise.then(function(user) {
+					// We are using ux_mode:redirect; we should not get here but just in case:
+					handleSignedIn(user);
+				}).catch(function (e) {
+					console.log("error", e);
+				});
+			}
+		}).catch(function(e) {
+			console.log("google auth error", e);
+		});
+	});
 }
 </script>
 </head>

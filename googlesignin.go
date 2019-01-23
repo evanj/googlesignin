@@ -337,13 +337,14 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 	})
 }
 
-// InsecureMakeAuthenticated makes a new *http.Request that authenticated. It copies r then
-// sets token in the correct cookie, and marks the request as valid for MustGetEmail. This should
-// only be called by tests.
-func InsecureMakeAuthenticated(r *http.Request, token string) *http.Request {
+// InsecureMakeAuthenticated makes a new *http.Request that authenticated. It copies r and
+// sets idToken and accessToken in the correct cookies, and marks the request as valid for
+// MustGetEmail. This should only be called by tests.
+func InsecureMakeAuthenticated(r *http.Request, idToken string, accessToken string) *http.Request {
 	ctxAuthenticated := context.WithValue(r.Context(), authenticatorKey, authenticatorKey)
 	rWithContext := r.WithContext(ctxAuthenticated)
-	rWithContext.AddCookie(&http.Cookie{Name: idTokenCookieName, Value: token})
+	rWithContext.AddCookie(&http.Cookie{Name: idTokenCookieName, Value: idToken})
+	rWithContext.AddCookie(&http.Cookie{Name: accessTokenCookieName, Value: accessToken})
 	return rWithContext
 }
 

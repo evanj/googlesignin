@@ -2,6 +2,8 @@
 package googlesignin_test
 
 import (
+	"bytes"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,11 +93,16 @@ func TestAuthenticatedHandler(t *testing.T) {
 	calledRequest = nil
 
 	// the sign in path must be public
+	f.a.ExtraScopes = "extra_scope"
 	r.URL.Path = "/__start_signin"
 	recorder = httptest.NewRecorder()
 	authenticatedHandler.ServeHTTP(recorder, r)
 	if calledRequest != nil || recorder.Code != http.StatusOK {
 		t.Error("expected succesful request for sign in:", recorder.Code)
+	}
+	body, _ := ioutil.ReadAll(recorder.Result().Body)
+	if !bytes.Contains(body, []byte("openid email extra_scope")) {
+		t.Error("sign in page should contain scopes", string(body))
 	}
 
 	r.URL.Path = "/other"

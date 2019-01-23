@@ -1,9 +1,13 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"html/template"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/evanj/googlesignin"
@@ -18,6 +22,7 @@ const rootHTML = `<!doctype html><html><head>
 <ul>
 <li><a href="/page1">Page 1</a></li>
 <li><a href="/page2">Page 2</a></li>
+<li><a href="/tokeninfo">Show access token info</a></li>
 </ul>
 </body></html>`
 
@@ -31,7 +36,8 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 type pageValues struct {
-	Email string
+	Email     string
+	TokenInfo string
 }
 
 var pageTemplate = template.Must(template.New("page1").Parse(`<!doctype html><html><head>
@@ -40,6 +46,12 @@ var pageTemplate = template.Must(template.New("page1").Parse(`<!doctype html><ht
 <body>
 <h1>Google Sign-In Page</h1>
 <p>Hello {{.Email}}!</p>
+{{if .TokenInfo}}
+<h2>tokeninfo</h2>
+<pre>
+{{.TokenInfo}}
+</pre>
+{{end}}
 </body></html>`))
 
 type server struct {
@@ -48,8 +60,38 @@ type server struct {
 }
 
 func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
-	values := &pageValues{s.authenticator.MustGetEmail(r)}
+	values := &pageValues{s.authenticator.MustGetEmail(r), ""}
 	err := pageTemplate.Execute(w, values)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (s *server) accessTokenPage(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := s.authenticator.GetAccessToken(r)
+	if err != nil {
+		panic(err)
+	}
+	params := url.Values{}
+	params.Set("access_token", accessToken)
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?" + params.Encode())
+	if err != nil {
+		panic(err)
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	err2 := resp.Body.Close()
+	if err != nil {
+		panic(err)
+	}
+	if err2 != nil {
+		panic(err2)
+	}
+	if resp.StatusCode != http.StatusOK {
+		panic(fmt.Sprintf("failed response code: %d", resp.StatusCode))
+	}
+
+	values := &pageValues{s.authenticator.MustGetEmail(r), string(body)}
+	err = pageTemplate.Execute(w, values)
 	if err != nil {
 		panic(err)
 	}
@@ -64,6 +106,7 @@ func newServer(clientID string) *server {
 	s := &server{authenticator, nil}
 	mux.HandleFunc("/page1", s.handlePage)
 	mux.HandleFunc("/page2", s.handlePage)
+	mux.HandleFunc("/tokeninfo", s.accessTokenPage)
 
 	s.handler = authenticator.RequireSignIn(mux)
 	authenticator.MakePublic("/")
@@ -74,6 +117,10 @@ func newServer(clientID string) *server {
 }
 
 func main() {
+	insecureCookies := flag.Bool("insecureCookies", false,
+		"Allow sending cookies over HTTP; use for localhost testing")
+	flag.Parse()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -86,5 +133,9 @@ func main() {
 	}
 
 	s := newServer(clientID)
+	if *insecureCookies {
+		s.authenticator.InsecureCookies()
+		log.Printf("warning: permitting insecure HTTP cookies")
+	}
 	log.Fatal(http.ListenAndServe(":"+port, s.handler))
 }

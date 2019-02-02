@@ -94,6 +94,7 @@ func TestAuthenticatedHandler(t *testing.T) {
 
 	// the sign in path must be public
 	f.a.ExtraScopes = "extra_scope"
+	r.URL.Scheme = "https"
 	r.URL.Path = "/__start_signin"
 	recorder = httptest.NewRecorder()
 	authenticatedHandler.ServeHTTP(recorder, r)
@@ -115,5 +116,36 @@ func TestAuthenticatedHandler(t *testing.T) {
 	email := f.a.MustGetEmail(calledRequest)
 	if email != testEmail {
 		t.Errorf("MustGetEmail expected %#v got %#v", testEmail, email)
+	}
+}
+
+func TestHTTPSSignIn(t *testing.T) {
+	f := newFixture()
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	authenticatedHandler := f.a.RequireSignIn(http.HandlerFunc(handler))
+
+	// HTTPS request: works
+	recorder := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/__start_signin", nil)
+	r.URL.Scheme = "https"
+	authenticatedHandler.ServeHTTP(recorder, r)
+	if recorder.Code != http.StatusOK {
+		t.Error("expected OK:", recorder.Code)
+	}
+
+	// HTTP request: fails
+	recorder = httptest.NewRecorder()
+	r.URL.Scheme = "http"
+	authenticatedHandler.ServeHTTP(recorder, r)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Error("expected InternalServerError:", recorder.Code)
+	}
+
+	// HTTP request with insecure set: works
+	f.a.PermitInsecureCookies()
+	recorder = httptest.NewRecorder()
+	authenticatedHandler.ServeHTTP(recorder, r)
+	if recorder.Code != http.StatusOK {
+		t.Error("expected OK:", recorder.Code)
 	}
 }

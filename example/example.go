@@ -137,7 +137,7 @@ func main() {
 
 	s := newServer(clientID)
 	if *insecureCookies {
-		s.authenticator.InsecureCookies()
+		s.authenticator.PermitInsecureCookies()
 		log.Printf("warning: permitting insecure HTTP cookies")
 	}
 	log.Fatal(http.ListenAndServe(":"+port, s.handler))

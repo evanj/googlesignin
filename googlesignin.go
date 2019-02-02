@@ -3,20 +3,12 @@ package googlesignin
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
-	"regexp"
-	"strconv"
-	"time"
 
-	"google.golang.org/appengine"
-	"google.golang.org/appengine/urlfetch"
-	"gopkg.in/square/go-jose.v2"
-	"gopkg.in/square/go-jose.v2/jwt"
+	"github.com/evanj/googlesignin/jwkkeys"
 )
 
 const idTokenCookieName = "__id"
@@ -29,118 +21,12 @@ const defaultSecureCookie = "secure;"
 // https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
 const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
 
-// Issuer is the value of the issuer field (iss) in Google's OpenID tokens.
+// Issuer is the value of the issuer field (iss) in Google Sign-In's tokens.
 const Issuer = "accounts.google.com"
-
-var maxAgePattern = regexp.MustCompile(`(?:,|^)\s*(?i:max-age)\s*=\s*([^\s,]+)`)
-
-// ErrKeyNotFound is the error returned by KeySet.Get when the key ID is not found.
-var ErrKeyNotFound = errors.New("key not found")
 
 type contextKey int
 
 const authenticatorKey = contextKey(1)
-
-// Fetches and parses keys from sourceURL, caching them for as long as permitted.
-type cachedKeySet struct {
-	sourceURL string
-	keys      *jose.JSONWebKeySet
-	expires   time.Time
-}
-
-// Parses the max-age out of a Cache-Control header. Returns minCache if it cannot parse it, or
-// if the value is blow the minimum.
-// TODO: Use a real header parser that obeys all the various rules? E.g.
-// https://github.com/pquerna/cachecontrol
-//
-// See the specifications:
-// Cache-Control: https://tools.ietf.org/html/rfc7234#section-5.2
-// ABNF syntax: https://tools.ietf.org/html/rfc7234#appendix-C
-func parseMaxAge(cacheControl string) int {
-	// parse with a regexp; quoted strings could confuse this but it seems unlikely
-	matches := maxAgePattern.FindStringSubmatch(cacheControl)
-	if len(matches) == 0 {
-		return minCacheSeconds
-	}
-	if len(matches) != 2 {
-		panic("logic bug: must have exactly 1 capturing group")
-	}
-
-	parsedSeconds, err := strconv.Atoi(matches[1])
-	if err != nil {
-		return minCacheSeconds
-	}
-	if parsedSeconds < minCacheSeconds {
-		return minCacheSeconds
-	}
-	return parsedSeconds
-}
-
-func (c *cachedKeySet) Get(keyID string) (*jose.JSONWebKey, error) {
-	set, err := c.getKeySet()
-	if err != nil {
-		return nil, err
-	}
-
-	keys := set.Key(keyID)
-	if len(keys) > 0 {
-		return &keys[0], nil
-	}
-	return nil, ErrKeyNotFound
-}
-
-// TODO: Remove! This isn't even guaranteed to work due to a race, but its good enough for now.
-var legacyAppEngineHackClient = http.DefaultClient
-var hackForLegacyAppEngine = func(r *http.Request) {}
-
-// EnableLegacyAppEngineHack makes this barely work with go1.9. It replaces a module-level client
-// with the App Engine urlfetch client. This has a horrible race condition and should not be used
-// for critical applications. It only exists to make it easier to port an application to Go 1.11.
-// TODO: Remove this.
-func EnableLegacyAppEngineHack() {
-	hackForLegacyAppEngine = func(r *http.Request) {
-		ctx := appengine.NewContext(r)
-		legacyAppEngineHackClient = urlfetch.Client(ctx)
-	}
-}
-
-func (c *cachedKeySet) getKeySet() (*jose.JSONWebKeySet, error) {
-	if c.keys != nil && time.Now().Before(c.expires) {
-		return c.keys, nil
-	}
-
-	resp, err := legacyAppEngineHackClient.Get(c.sourceURL)
-	if err != nil {
-		return nil, err
-	}
-
-	decoder := json.NewDecoder(resp.Body)
-	keys := &jose.JSONWebKeySet{}
-	err = decoder.Decode(keys)
-	err2 := resp.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-	if err2 != nil {
-		return nil, err2
-	}
-
-	cacheSeconds := parseMaxAge(resp.Header.Get("Cache-Control"))
-	if cacheSeconds == minCacheSeconds {
-		log.Printf("warning: caching for minimum time: Cache-Control: %#v",
-			resp.Header.Get("Cache-Control"))
-	}
-	c.expires = time.Now().Add(time.Duration(cacheSeconds) * time.Second)
-	c.keys = keys
-	return c.keys, nil
-}
-
-// KeySet retrieves keys in JWK format to validate tokens.
-type KeySet interface {
-	// Get returns the key matching keyID, or an error indicating what happened. Must return
-	// ErrKeyNotFound if the key does not exist.
-	Get(keyID string) (*jose.JSONWebKey, error)
-}
 
 // Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
@@ -157,7 +43,7 @@ type Authenticator struct {
 	RedirectIfNotSignedIn bool
 
 	// Gets keys to validate tokens. Should not be changed except in tests.
-	CachedKeys KeySet
+	CachedKeys jwkkeys.Set
 
 	clientID           string
 	signedInPath       string
@@ -171,7 +57,7 @@ type Authenticator struct {
 func New(clientID string, signedInPath string) *Authenticator {
 	return &Authenticator{
 		defaultScopes, "", defaultSignInPath, false,
-		&cachedKeySet{googleJWKURL, nil, time.Time{}},
+		jwkkeys.New(googleJWKURL),
 		clientID, signedInPath,
 		make(map[string]bool), defaultSecureCookie,
 	}
@@ -209,28 +95,6 @@ func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) 
 	buf.WriteTo(w)
 }
 
-// ExtraClaims stores the JSON for Google Sign-In's extra claims that are not included in the
-// basic OpenID claims.
-type ExtraClaims struct {
-	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param
-	HostedDomain string `json:"hd,omitempty"`
-	Email        string `json:"email,omitempty"`
-}
-
-func findKey(keys KeySet, token *jwt.JSONWebToken) (*jose.JSONWebKey, error) {
-	for _, header := range token.Headers {
-		key, err := keys.Get(header.KeyID)
-		if err == ErrKeyNotFound {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		return key, nil
-	}
-	return nil, ErrKeyNotFound
-}
-
 // GetEmail returns the email for a request. The error reports details that should not be returned
 // to the client. However, it will not leak truly private data (e.g. the token).
 func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
@@ -239,45 +103,21 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	if err == http.ErrNoCookie {
 		return "", fmt.Errorf("no ID token cookie found")
 	}
-	if err != nil {
-		return "", err
-	}
-	token, err := jwt.ParseSigned(cookie.Value)
-	if err != nil {
-		return "", err
-	}
-
-	// validate the token and get the claims
-	key, err := findKey(a.CachedKeys, token)
-	if err != nil {
-		return "", err
-	}
-	standardClaims := &jwt.Claims{}
-	extraClaims := &ExtraClaims{}
-	err = token.Claims(key, standardClaims, extraClaims)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println(standardClaims, extraClaims)
-	err = standardClaims.Validate(jwt.Expected{
-		Audience: jwt.Audience{a.clientID},
-		Issuer:   Issuer,
-		Time:     time.Now(),
-	})
+	claims, err := jwkkeys.ValidateGoogleClaims(a.CachedKeys, cookie.Value, a.clientID, Issuer)
 	if err != nil {
 		return "", err
 	}
 
-	log.Println("claims", standardClaims, extraClaims)
-	if a.HostedDomain != "" && a.HostedDomain != extraClaims.HostedDomain {
+	// extra validation of the Google-specific claims
+	if a.HostedDomain != "" && a.HostedDomain != claims.HostedDomain {
 		return "", fmt.Errorf("hosted domain does not match %s != %s",
-			a.HostedDomain, extraClaims.HostedDomain)
+			a.HostedDomain, claims.HostedDomain)
 	}
-	if extraClaims.Email == "" {
-		return "", fmt.Errorf("invalid email: %s", extraClaims.Email)
+	if claims.Email == "" {
+		return "", fmt.Errorf("invalid email: %s", claims.Email)
 	}
 
-	return extraClaims.Email, nil
+	return claims.Email, nil
 }
 
 // GetAccessToken returns the access token for a request. The error reports details that should not
@@ -322,7 +162,6 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		}
 
 		// requires authentication
-		hackForLegacyAppEngine(r)
 		_, err := a.GetEmail(r)
 		if err != nil {
 			log.Printf("%s: not authenticated: %s", r.URL.String(), err.Error())

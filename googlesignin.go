@@ -226,7 +226,6 @@ function init() {
 
 		// Returns the path we should redirect BACK to, if we are authenticated, or the empty string.
 		function getRedirect() {
-			debugger;
 			const hash = window.location.hash;
 			if (hash.startsWith("#/")) {
 				return hash.substring(2);
@@ -242,7 +241,6 @@ function init() {
 		}
 
 		function saveRedirectFromHash() {
-			debugger;
 			const hash = window.location.hash;
 			if (hash[0] === "/") {
 				sessionStorage.setItem(sessionStorageKey, hash);

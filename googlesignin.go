@@ -177,16 +177,24 @@ func New(clientID string, signedInPath string) *Authenticator {
 	}
 }
 
-// InsecureCookies configures the Authenticator to send cookies over HTTP connections. This should
-// only be used for localhost testing. In other cases, you should only send the cookie over HTTPS
-// since it contains sensitive user data.
-func (a *Authenticator) InsecureCookies() {
+// PermitInsecureCookies configures the Authenticator to send cookies over HTTP connections. This
+// should only be used for localhost testing. In production, you should only send the cookie over
+// HTTPS since it contains sensitive user data.
+func (a *Authenticator) PermitInsecureCookies() {
 	a.secureCookieOption = ""
 }
 
 // Renders the Google sign-in page, which will eventually set the ID token cookie and redirect
 // the user to LoggedInPath.
 func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) {
+	if a.secureCookieOption != "" && r.URL.Scheme != "https" {
+		// fail sign in over HTTP unless explicitly permitted. This makes the error obvious, rather than
+		// ending up in a redirect loop
+		log.Println("ERROR: refusing to serve sign in page over HTTP; Use PermitInsecureCookies to allow")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	data := &signInValues{a.clientID, a.signedInPath, idTokenCookieName, accessTokenCookieName,
 		defaultScopes + " " + a.ExtraScopes, a.HostedDomain, a.secureCookieOption}
 	buf := &bytes.Buffer{}
@@ -337,7 +345,7 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 	})
 }
 
-// InsecureMakeAuthenticated makes a new *http.Request that authenticated. It copies r and
+// InsecureMakeAuthenticated makes a new *http.Request that is authenticated. It copies r and
 // sets idToken and accessToken in the correct cookies, and marks the request as valid for
 // MustGetEmail. This should only be called by tests.
 func InsecureMakeAuthenticated(r *http.Request, idToken string, accessToken string) *http.Request {
@@ -379,6 +387,7 @@ function init() {
 
 		// Returns the path we should redirect BACK to, if we are authenticated, or the empty string.
 		function getRedirect() {
+			debugger;
 			const hash = window.location.hash;
 			if (hash[0] === "/") {
 				return hash;
@@ -394,6 +403,7 @@ function init() {
 		}
 
 		function saveRedirectFromHash() {
+			debugger;
 			const hash = window.location.hash;
 			if (hash[0] === "/") {
 				sessionStorage.setItem(sessionStorageKey, hash);

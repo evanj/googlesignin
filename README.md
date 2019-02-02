@@ -1,15 +1,15 @@
 # Google Sign-In
 
-A Go HTTP middleware for the Google Sign-In web application JavaScript library.
+This library provides Go HTTP middleware to require Google Sign-In in a web application.
 
-Google currently recommends web applications use [their JavaScript library to implement "sign in with Google."](https://developers.google.com/identity/sign-in/web/) I was curious about this compares to the older OAuth redirect approach. This library tries to be as easy to use as possible, and implements secure defaults. It verifies ID tokens on the server side using Google's public keys and Square's JOSE library. It requires users to be logged in for all endpoints, except a list of endpoints that are explicitly public.
+Google currently recommends web applications use [their JavaScript library to implement "sign in with Google."](https://developers.google.com/identity/sign-in/web/) I was curious about this compares to the older OAuth redirect approach. This library tries to be as easy to use as possible, and implements secure defaults. It verifies ID tokens on the server side using Google's public keys and Square's JOSE library. It requires users to be logged in for all endpoints, except endpoints that are explicitly made public.
 
 This is particularly good for "internal applications" that should be available to users in your domain, but not the public. Just use the `RequiresSignIn` wrapper for all your endpoints, set the `HostedDomain` argument, and you are done! 
 
 
 ## Example
 
-The example is running at https://gosignin-demo.appspot.com/ or [see the code](example/example.go).
+The example is running at https://gosignin-demo.appspot.com/. It has a main page that is not protected, then three sub-pages that print the user's email address and additional access token information.
 
 To run it yourself:
 

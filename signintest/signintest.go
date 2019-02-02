@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/evanj/googlesignin"
+	"github.com/evanj/googlesignin/jwkkeys"
 	jose "gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
@@ -27,7 +28,7 @@ type RequestAuthenticator struct {
 func (r *RequestAuthenticator) InsecureMakeAuthenticated(
 	request *http.Request, email string,
 ) *http.Request {
-	idToken := makeSignedToken(&r.privateKey, email, r.authenticator.HostedDomain)
+	idToken := InsecureToken(ClientID, googlesignin.Issuer, email, r.authenticator.HostedDomain)
 	return googlesignin.InsecureMakeAuthenticated(request, idToken, "fake_access_token")
 }
 
@@ -46,7 +47,7 @@ func InsecureTestAuthenticator(authenticator *googlesignin.Authenticator) *Reque
 	r := &RequestAuthenticator{authenticator, jose.JSONWebKey{}}
 	r.loadJSONWebKey(insecurePrivateKey)
 	r.privateKey.KeyID = testKeyID
-	r.authenticator.CachedKeys = &staticKeySet{r.privateKey.Public()}
+	r.authenticator.CachedKeys = InsecureKeys()
 	return r
 }
 
@@ -60,28 +61,43 @@ func (r *RequestAuthenticator) loadJSONWebKey(json string) {
 	}
 }
 
-func makeSignedToken(jwk *jose.JSONWebKey, email string, hostedDomain string) string {
-	// from https://godoc.org/gopkg.in/square/go-jose.v2/jwt#Signed
-	// this library embeds kid if signing with a private key
-	signingKey := jose.SigningKey{Algorithm: jose.SignatureAlgorithm(jwk.Algorithm), Key: jwk}
-	sig, err := jose.NewSigner(signingKey, (&jose.SignerOptions{}).WithType("JWT"))
+func parsePrivateKey() *jose.JSONWebKey {
+	privateKey := &jose.JSONWebKey{}
+	err := privateKey.UnmarshalJSON([]byte(insecurePrivateKey))
+	if err != nil {
+		panic(err)
+	}
+	return privateKey
+}
+
+func InsecureKeys() *staticKeySet {
+	return &staticKeySet{parsePrivateKey().Public()}
+}
+
+func InsecureToken(audience string, issuer string, email string, hostedDomain string) string {
+	privateKey := parsePrivateKey()
+	signingKey := jose.SigningKey{
+		Algorithm: jose.SignatureAlgorithm(privateKey.Algorithm),
+		Key:       privateKey,
+	}
+	signer, err := jose.NewSigner(signingKey, (&jose.SignerOptions{}).WithType("JWT"))
 	if err != nil {
 		panic(err)
 	}
 
 	claims := jwt.Claims{
 		Subject:   "subject",
-		Issuer:    googlesignin.Issuer,
+		Audience:  jwt.Audience{audience},
+		Issuer:    issuer,
 		NotBefore: jwt.NewNumericDate(time.Date(2016, 1, 1, 0, 0, 0, 0, time.UTC)),
 		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		Audience:  jwt.Audience{ClientID},
 	}
-	extraClaims := googlesignin.ExtraClaims{
+	extraClaims := jwkkeys.GoogleExtraClaims{
 		Email:        email,
 		HostedDomain: hostedDomain,
 	}
 
-	raw, err := jwt.Signed(sig).Claims(claims).Claims(extraClaims).CompactSerialize()
+	raw, err := jwt.Signed(signer).Claims(claims).Claims(extraClaims).CompactSerialize()
 	if err != nil {
 		panic(err)
 	}

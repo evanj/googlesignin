@@ -389,8 +389,8 @@ function init() {
 		function getRedirect() {
 			debugger;
 			const hash = window.location.hash;
-			if (hash[0] === "/") {
-				return hash;
+			if (hash.startsWith("#/")) {
+				return hash.substring(2);
 			}
 
 			const sessionRedirect = sessionStorage.getItem(sessionStorageKey);

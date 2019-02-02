@@ -12,7 +12,7 @@ import (
 
 const jwtHeaderName = "x-goog-iap-jwt-assertion"
 const jwkURL = "https://www.gstatic.com/iap/verify/public_key-jwk"
-const Issuer = "https://cloud.google.com/iap"
+const issuer = "https://cloud.google.com/iap"
 
 type contextKey int
 
@@ -26,7 +26,7 @@ type middleware struct {
 
 func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headerValue := r.Header.Get(jwtHeaderName)
-	claims, err := jwkkeys.ValidateGoogleClaims(m.cachedKeys, headerValue, m.audience, Issuer)
+	claims, err := jwkkeys.ValidateGoogleClaims(m.cachedKeys, headerValue, m.audience, issuer)
 	if err != nil {
 		log.Printf("ERROR: failed verifying JWT: %s", err.Error())
 		http.Error(w, "forbidden", http.StatusForbidden)

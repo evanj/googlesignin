@@ -44,6 +44,7 @@ type Set interface {
 	Get(keyID string) (*jose.JSONWebKey, error)
 }
 
+// New returns a new CachedSet that stores keys loaded from url.
 func New(url string) *CachedSet {
 	return &CachedSet{url, nil, time.Time{}}
 }
@@ -76,6 +77,7 @@ func parseMaxAge(cacheControl string) int {
 	return parsedSeconds
 }
 
+// Get returns the key matching keyID, or ErrNotFound if it could not be found.
 func (c *CachedSet) Get(keyID string) (*jose.JSONWebKey, error) {
 	set, err := c.getKeySet()
 	if err != nil {

@@ -70,10 +70,13 @@ func parsePrivateKey() *jose.JSONWebKey {
 	return privateKey
 }
 
-func InsecureKeys() *staticKeySet {
+// InsecureKeys returns a key set containing an insecure test key. Should only be used in tests.
+func InsecureKeys() jwkkeys.Set {
 	return &staticKeySet{parsePrivateKey().Public()}
 }
 
+// InsecureToken returns a new token that is signed by a key in InsecureKeys. Should only be used
+// in tests.
 func InsecureToken(audience string, issuer string, email string, hostedDomain string) string {
 	privateKey := parsePrivateKey()
 	signingKey := jose.SigningKey{

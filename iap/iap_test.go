@@ -24,7 +24,7 @@ func TestNoHeader(t *testing.T) {
 
 	// TODO: Add fake header: it should work
 	const email = "u@example.com"
-	validToken := signintest.InsecureToken(audience, Issuer, email, "")
+	validToken := signintest.InsecureToken(audience, issuer, email, "")
 	r.Header.Set(jwtHeaderName, validToken)
 
 	recorder = httptest.NewRecorder()

@@ -73,9 +73,12 @@ func (a *Authenticator) PermitInsecureCookies() {
 // Renders the Google sign-in page, which will eventually set the ID token cookie and redirect
 // the user to LoggedInPath.
 func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) {
-	if a.secureCookieOption != "" && r.URL.Scheme != "https" {
-		// fail sign in over HTTP unless explicitly permitted. This makes the error obvious, rather than
-		// ending up in a redirect loop
+	// fail sign in over HTTP unless explicitly permitted. This makes the error obvious, rather than
+	// ending up in a redirect loop. We trust the X-Forwarded-Proto header, even though it could be
+	// added by the original client rather than a proxy, because this is an attempt to prevent
+	// configuration mistakes, not a security measure
+	servedOverHTTPS := r.URL.Scheme == "https" || r.Header.Get("X-Forwarded-Proto") == "https"
+	if a.secureCookieOption != "" && !servedOverHTTPS {
 		log.Println("ERROR: refusing to serve sign in page over HTTP; Use PermitInsecureCookies to allow")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return

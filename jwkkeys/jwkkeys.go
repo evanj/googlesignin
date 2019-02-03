@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	jose "gopkg.in/square/go-jose.v2"
@@ -31,7 +32,9 @@ type GoogleExtraClaims struct {
 }
 
 // CachedSet fetches and parses keys from a URL, caching them for as long as permitted.
+// It is safe to be used by multiple Goroutines since all accesses are locked.
 type CachedSet struct {
+	mu        sync.Mutex
 	sourceURL string
 	keys      *jose.JSONWebKeySet
 	expires   time.Time
@@ -46,7 +49,7 @@ type Set interface {
 
 // New returns a new CachedSet that stores keys loaded from url.
 func New(url string) *CachedSet {
-	return &CachedSet{url, nil, time.Time{}}
+	return &CachedSet{sync.Mutex{}, url, nil, time.Time{}}
 }
 
 // Parses the max-age out of a Cache-Control header. Returns minCache if it cannot parse it, or
@@ -92,6 +95,10 @@ func (c *CachedSet) Get(keyID string) (*jose.JSONWebKey, error) {
 }
 
 func (c *CachedSet) getKeySet() (*jose.JSONWebKeySet, error) {
+	// this is the only function that modifies the values, so this needs to be synchronized
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.keys != nil && time.Now().Before(c.expires) {
 		return c.keys, nil
 	}

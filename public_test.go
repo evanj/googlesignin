@@ -141,6 +141,16 @@ func TestHTTPSSignIn(t *testing.T) {
 		t.Error("expected InternalServerError:", recorder.Code)
 	}
 
+	// HTTP with X-Forwarded-Proto: success
+	recorder = httptest.NewRecorder()
+	r.URL.Scheme = "http"
+	r.Header.Set("X-Forwarded-Proto", "https")
+	authenticatedHandler.ServeHTTP(recorder, r)
+	if recorder.Code != http.StatusOK {
+		t.Error("expected OK:", recorder.Code)
+	}
+	r.Header.Del("X-Forwarded-Proto")
+
 	// HTTP request with insecure set: works
 	f.a.PermitInsecureCookies()
 	recorder = httptest.NewRecorder()

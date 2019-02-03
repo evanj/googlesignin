@@ -81,6 +81,27 @@ func TestCachedKeys(t *testing.T) {
 	if !handledRequest {
 		t.Error("response should have been refreshed")
 	}
+
+	// test threaded
+	const numThreads = 10
+	start := make(chan struct{})
+	finished := make(chan error)
+	for i := 0; i < numThreads; i++ {
+		go func() {
+			<-start
+			_, err := cachedKeys.Get("keyID")
+			finished <- err
+		}()
+	}
+	// force expiry again
+	cachedKeys.expires = time.Now().Add(-time.Second)
+	close(start)
+	for i := 0; i < numThreads; i++ {
+		err := <-finished
+		if err != ErrKeyNotFound {
+			t.Error("found unexpected error:", err)
+		}
+	}
 }
 
 func TestGoogleClaimsJSON(t *testing.T) {

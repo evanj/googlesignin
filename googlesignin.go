@@ -256,7 +256,8 @@ function init() {
 				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
 			document.cookie = "{{.AccessTokenCookieName}}=" + response.access_token +
 				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
-			window.location = getRedirect();
+			// use replace so this redirect does not appear when the user clicks back
+			window.location.replace(getRedirect());
 		}
 
 		const initPromise = gapi.auth2.init({

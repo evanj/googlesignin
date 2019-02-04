@@ -45,7 +45,7 @@ func iapTestPage(w http.ResponseWriter, r *http.Request) {
 	values := &iapValues{email, []iapTestCase{
 		// https://cloud.google.com/iap/docs/special-urls-and-headers-howto#testing_jwt_verification
 		{"NOT_SET", "A valid JWT."},
-		{"FUTURE_ISSUE", "Issue date is set in the future (not checked by go-jose: https://github.com/square/go-jose/issues/216)"},
+		{"FUTURE_ISSUE", "Issue date is set in the future."},
 		{"PAST_EXPIRATION", "Expiration date is set in the past."},
 		{"ISSUER", "Incorrect issuer."},
 		{"AUDIENCE", "Incorrect audience."},

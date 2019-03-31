@@ -2,11 +2,17 @@ package serviceaccount
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
+	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 
 	"testing"
+
+	"golang.org/x/oauth2/google"
 )
 
 const googleCredentialsEnvVar = "GOOGLE_APPLICATION_CREDENTIALS"
@@ -28,7 +34,7 @@ func setEnvAndCleanUp(key string, value string) func() {
 	}
 }
 
-func TestKeyFromDefault(t *testing.T) {
+func TestNewSourceFromDefault(t *testing.T) {
 	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile (and clean up after)
 	f, err := ioutil.TempFile("", "")
 	if err != nil {
@@ -53,18 +59,18 @@ func TestKeyFromDefault(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		config, _, err := keyFromDefault(context.Background())
+		source, err := sourceFromDefault(context.Background(), "audience", "url")
 		if test.errSubstring != "" {
 			if err == nil || !strings.Contains(err.Error(), test.errSubstring) {
 				t.Error(i, err)
 			}
-		} else if config.Email != test.email {
-			t.Error(i, config.Email)
+		} else if source.email != test.email {
+			t.Error(i, source.email)
 		}
 	}
 }
 
-func TestKeyFromDefaultComputeEngine(t *testing.T) {
+func TestSourceFromDefaultComputeEngine(t *testing.T) {
 	// set HOME to a temp dir: causes FindDefaultCredentials to not find gcloud credentials (if any)
 	tempdir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -75,9 +81,60 @@ func TestKeyFromDefaultComputeEngine(t *testing.T) {
 	// make FindDefaultCredentials think we are on compute engine
 	defer setEnvAndCleanUp(gceMetadataHostEnv, "doesnotexist.example.com")()
 
-	_, _, err = keyFromDefault(context.Background())
+	_, err = sourceFromDefault(context.Background(), "audience", "url")
 	if err != ErrComputeEngineNotSupported {
 		t.Error(err)
+	}
+}
+
+func TestTokenSource(t *testing.T) {
+	assertionFormParam := ""
+	responseString := ""
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("got request", r)
+		assertionFormParam = r.FormValue("assertion")
+		w.Write([]byte(responseString))
+	}))
+	defer testServer.Close()
+
+	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile (and clean up after)
+	f, err := ioutil.TempFile("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer setEnvAndCleanUp(googleCredentialsEnvVar, f.Name())()
+	f.Write([]byte(expiredServiceKey))
+
+	// generate an id token that at least parses
+	config, err := google.JWTConfigFromJSON([]byte(expiredServiceKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey, err := parseKey(config.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputJWT, err := makeJWT(config.Email, config.PrivateKeyID, privateKey, "audience")
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseString = fmt.Sprintf(`{"id_token": "%s"}`, outputJWT)
+
+	tokenSource, err := newSourceFromDefaultURL(context.Background(), "test_audience", testServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := tokenSource.Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// TODO: Check the values being posted?
+	if assertionFormParam == "" {
+		t.Error(assertionFormParam)
+	}
+	if !token.Valid() {
+		t.Error("token.Valid() returned false")
 	}
 }
 

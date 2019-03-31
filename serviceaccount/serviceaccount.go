@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,12 +18,10 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/jws"
-	"golang.org/x/oauth2/jwt"
 )
 
 const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer"
-const oauthTokenURL = "https://www.googleapis.com/oauth2/v4/token"
-const formContentType = "application/x-www-form-urlencoded"
+const googleTokenURL = "https://www.googleapis.com/oauth2/v4/token"
 const tokenExpiration = time.Hour
 
 // Compute engine metadata
@@ -37,28 +36,29 @@ const tokenExpiration = time.Hour
 var ErrComputeEngineNotSupported = errors.New("serviceaccount: Can't sign tokens with Compute Engine credentials")
 var ErrUserCredentialsNotSupported = errors.New("serviceaccount: Can't sign tokens with user credentials")
 
-// Return the OAuth2 configuration and signing key from the Google application default credentials.
-func keyFromDefault(ctx context.Context) (*jwt.Config, *rsa.PrivateKey, error) {
+// Create an oauth2 token source using the configuration and signing key from the Google
+// application default credentials.
+func sourceFromDefault(ctx context.Context, targetAudience string, tokenURL string) (*oidcTokenSource, error) {
 	credentials, err := google.FindDefaultCredentials(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(credentials.JSON) == 0 {
-		return nil, nil, ErrComputeEngineNotSupported
+		return nil, ErrComputeEngineNotSupported
 	}
 	config, err := google.JWTConfigFromJSON(credentials.JSON)
 	if err != nil {
 		// friendly error message that we found user credentials
 		if strings.Contains(err.Error(), "authorized_user") {
-			return nil, nil, ErrUserCredentialsNotSupported
+			return nil, ErrUserCredentialsNotSupported
 		}
-		return nil, nil, err
+		return nil, err
 	}
 	privateKey, err := parseKey(config.PrivateKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return config, privateKey, nil
+	return &oidcTokenSource{config.Email, config.PrivateKeyID, privateKey, targetAudience, tokenURL}, nil
 }
 
 // NewSourceFromDefault returns a new token source from the Google application default credentials.
@@ -67,14 +67,30 @@ func keyFromDefault(ctx context.Context) (*jwt.Config, *rsa.PrivateKey, error) {
 // account key, since a user account and the Compute Engine metadata service do not expose the
 // private signing key.
 func NewSourceFromDefault(ctx context.Context, targetAudience string) (oauth2.TokenSource, error) {
-	// get the signing key from the google default credentials
-	config, privateKey, err := keyFromDefault(ctx)
-	if err != nil {
-		return nil, err
-	}
+	return newSourceFromDefaultURL(ctx, targetAudience, googleTokenURL)
+}
 
+// An oauth2.TokenSource that uses Google's OpenID Connect to issue tokens. This is almost exactly
+// what happens for Google's "native" tokens, with the addition of a "target_audience" claim
+// instead of "scopes" ... or something like that. I can't quite keep track.
+//
+// This source is uncached: each time Token is called, it contacts Google. It should be wrapped
+// in an oauth2.ReuseTokenSource so it is cached.
+type oidcTokenSource struct {
+	email          string
+	keyID          string
+	privateKey     *rsa.PrivateKey
+	targetAudience string
+	tokenURL       string
+}
+
+func (o *oidcTokenSource) makeJWT() (string, error) {
+	return makeJWT(o.email, o.keyID, o.privateKey, o.targetAudience)
+}
+
+func (o *oidcTokenSource) Token() (*oauth2.Token, error) {
 	// sign a JWT proving that we have access to this key, proving our identity to targetAudience.
-	tokenString, err := makeJWT(config, privateKey, targetAudience)
+	tokenString, err := o.makeJWT()
 	if err != nil {
 		return nil, err
 	}
@@ -83,30 +99,63 @@ func NewSourceFromDefault(ctx context.Context, targetAudience string) (oauth2.To
 	postParams := url.Values{}
 	postParams.Set("grant_type", jwtBearerGrantType)
 	postParams.Set("assertion", tokenString)
-	resp, err := http.Post(oauthTokenURL, formContentType, strings.NewReader(postParams.Encode()))
+	resp, err := http.PostForm(o.tokenURL, postParams)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		panic(resp.Status)
+		return nil, fmt.Errorf("serviceaccount: failed to get signed token: %s", resp.Status)
 	}
 	decoder := json.NewDecoder(resp.Body)
 	idResponse := &tokenResponse{}
 	err = decoder.Decode(idResponse)
 	if err != nil {
-		panic(err)
-	}
-	err = resp.Body.Close()
-	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	// return this token
-	// TODO: Parse expiration and manage refreshes
-	log.Printf("token: %s", idResponse.IDToken)
-	token := &oauth2.Token{AccessToken: idResponse.IDToken}
-	return oauth2.StaticTokenSource(token), nil
+	// parse the token to determine expiration time etc
+	claims, err := jws.Decode(idResponse.IDToken)
+	if err != nil {
+		return nil, err
+	}
+	expirationTime := time.Unix(claims.Exp, 0)
+	token := &oauth2.Token{AccessToken: idResponse.IDToken, Expiry: expirationTime}
+	if !token.Valid() {
+		return nil, errors.New("serviceaccount: expired token returned from IDP")
+	}
+	log.Printf("got token from google expiry:%d %s", claims.Exp, expirationTime.UTC().Format(time.RFC3339))
+	return token, nil
+}
+
+func newSourceFromDefaultURL(ctx context.Context, targetAudience string, oauthTokenURL string) (oauth2.TokenSource, error) {
+	// get the identity and private key from the google default credentials
+	source, err := sourceFromDefault(ctx, targetAudience, oauthTokenURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch an initial token to verify that the configuration is correct
+	token, err := source.Token()
+	if err != nil {
+		return nil, err
+	}
+
+	// wrap the source in a caching/refreshing layer
+	return oauth2.ReuseTokenSource(token, source), nil
+}
+
+func parseToken(token string) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return fmt.Errorf("serviceaccount: token has wrong number of parts: %d !=3", len(parts))
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return err
+	}
+	fmt.Println("XXXXX", string(decoded))
+	return nil
 }
 
 type tokenResponse struct {
@@ -137,13 +186,15 @@ func parseKey(key []byte) (*rsa.PrivateKey, error) {
 // go-jose because Google's OAuth implementation does not support the "aud" field as a list of
 // strings, in violation the RFC7519: https://tools.ietf.org/html/rfc7519#section-4.1.3
 // go-jose only serializes aud as a list of strings
-func makeJWT(config *jwt.Config, privateKey *rsa.PrivateKey, targetAudience string) (string, error) {
+// email: the email address of the key. Will be used in both the issuer and subject fields.
+// keyID: the ID of the private key that will be set in the JWT header.
+func makeJWT(email string, keyID string, privateKey *rsa.PrivateKey, targetAudience string) (string, error) {
 	issuedAt := time.Now()
 	expiry := issuedAt.Add(tokenExpiration)
 	cs := &jws.ClaimSet{
-		Iss: config.Email,
-		Sub: config.Email,
-		Aud: oauthTokenURL,
+		Iss: email,
+		Sub: email,
+		Aud: googleTokenURL,
 		Iat: issuedAt.Unix(),
 		Exp: expiry.Unix(),
 		PrivateClaims: map[string]interface{}{
@@ -153,7 +204,7 @@ func makeJWT(config *jwt.Config, privateKey *rsa.PrivateKey, targetAudience stri
 	hdr := &jws.Header{
 		Algorithm: "RS256",
 		Typ:       "JWT",
-		KeyID:     config.PrivateKeyID,
+		KeyID:     keyID,
 	}
 	return jws.Encode(hdr, cs, privateKey)
 }

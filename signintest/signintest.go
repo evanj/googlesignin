@@ -28,7 +28,7 @@ type RequestAuthenticator struct {
 func (r *RequestAuthenticator) InsecureMakeAuthenticated(
 	request *http.Request, email string,
 ) *http.Request {
-	idToken := InsecureToken(ClientID, googlesignin.Issuer, email, r.authenticator.HostedDomain)
+	idToken := InsecureToken(ClientID, jwkkeys.GoogleIssuers[0], email, r.authenticator.HostedDomain)
 	return googlesignin.InsecureMakeAuthenticated(request, idToken, "fake_access_token")
 }
 

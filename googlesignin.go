@@ -18,12 +18,6 @@ const defaultSignInPath = "/__start_signin"
 const defaultScopes = "openid email"
 const defaultSecureCookie = "secure;"
 
-// https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
-const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
-
-// Issuer is the value of the issuer field (iss) in Google Sign-In's tokens.
-const Issuer = "accounts.google.com"
-
 type contextKey int
 
 const authenticatorKey = contextKey(1)
@@ -57,7 +51,7 @@ type Authenticator struct {
 func New(clientID string, signedInPath string) *Authenticator {
 	return &Authenticator{
 		defaultScopes, "", defaultSignInPath, false,
-		jwkkeys.New(googleJWKURL),
+		jwkkeys.NewGoogle(),
 		clientID, signedInPath,
 		make(map[string]bool), defaultSecureCookie,
 	}
@@ -106,7 +100,8 @@ func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	if err == http.ErrNoCookie {
 		return "", fmt.Errorf("no ID token cookie found")
 	}
-	claims, err := jwkkeys.ValidateGoogleClaims(a.CachedKeys, cookie.Value, a.clientID, Issuer)
+	claims, err := jwkkeys.ValidateGoogleClaims(
+		a.CachedKeys, cookie.Value, a.clientID, jwkkeys.GoogleIssuers)
 	if err != nil {
 		return "", err
 	}

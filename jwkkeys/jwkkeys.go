@@ -18,6 +18,16 @@ import (
 
 const minCacheSeconds = 60
 
+// https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
+// https://accounts.google.com/.well-known/openid-configuration
+const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
+
+// GoogleIssuers contains the value of the iss field in Google ID tokens. When using Google Sign-In
+// via the JavaScript API, it seems to use accounts.google.com, but when using a service account,
+// it uses https://accounts.google.com.
+// See: https://developers.google.com/identity/protocols/OpenIDConnect#validatinganidtoken
+var GoogleIssuers = []string{"accounts.google.com", "https://accounts.google.com"}
+
 var maxAgePattern = regexp.MustCompile(`(?:,|^)\s*(?i:max-age)\s*=\s*([^\s,]+)`)
 
 // ErrKeyNotFound is the error returned by KeySet.Get when the key ID is not found.
@@ -50,6 +60,11 @@ type Set interface {
 // New returns a new CachedSet that stores keys loaded from url.
 func New(url string) *CachedSet {
 	return &CachedSet{sync.Mutex{}, url, nil, time.Time{}}
+}
+
+// NewGoogle returns a new CachedSet that loads Google's OAuth public keys.
+func NewGoogle() *CachedSet {
+	return New(googleJWKURL)
 }
 
 // Parses the max-age out of a Cache-Control header. Returns minCache if it cannot parse it, or
@@ -145,10 +160,10 @@ func findKey(keys Set, token *jwt.JSONWebToken) (*jose.JSONWebKey, error) {
 	return nil, ErrKeyNotFound
 }
 
-// ValidateGoogleClaims parses the JWT, verifies its signature nad claims, then returns the
+// ValidateGoogleClaims parses the JWT, verifies its signature and claims, then returns the
 // Google-specific claims.
 func ValidateGoogleClaims(
-	keys Set, serializedJWT string, audience string, issuer string,
+	keys Set, serializedJWT string, audience string, issuers []string,
 ) (*GoogleExtraClaims, error) {
 	token, err := jwt.ParseSigned(serializedJWT)
 	if err != nil {
@@ -166,11 +181,18 @@ func ValidateGoogleClaims(
 	if err != nil {
 		return nil, err
 	}
-	err = standardClaims.Validate(jwt.Expected{
-		Audience: jwt.Audience{audience},
-		Issuer:   issuer,
-		Time:     time.Now(),
-	})
+
+	// try all the issuers; return the last error
+	for _, issuer := range issuers {
+		err = standardClaims.Validate(jwt.Expected{
+			Audience: jwt.Audience{audience},
+			Issuer:   issuer,
+			Time:     time.Now(),
+		})
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

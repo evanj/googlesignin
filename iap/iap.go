@@ -12,7 +12,8 @@ import (
 
 const jwtHeaderName = "x-goog-iap-jwt-assertion"
 const jwkURL = "https://www.gstatic.com/iap/verify/public_key-jwk"
-const issuer = "https://cloud.google.com/iap"
+
+var issuer = []string{"https://cloud.google.com/iap"}
 
 type contextKey int
 

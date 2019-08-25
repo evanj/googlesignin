@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/evanj/googlesignin/iap"
 )
@@ -14,8 +15,9 @@ type iapTestCase struct {
 	Description string
 }
 type iapValues struct {
-	Email     string
-	TestPages []iapTestCase
+	Email      string
+	IAPHeaders map[string]string
+	TestPages  []iapTestCase
 }
 
 var iapTemplate = template.Must(template.New("page1").Parse(`<!doctype html><html><head>
@@ -24,6 +26,14 @@ var iapTemplate = template.Must(template.New("page1").Parse(`<!doctype html><htm
 <body>
 <h1>Identity-Aware Proxy Test Page</h1>
 <p>Hello {{.Email}}! This page should be protected by Google's Identity-Aware Proxy.</p>
+
+<h2>IAP Headers</h2>
+<table style="table-layout: fixed; width: 100%;">
+<tr><th style="width: 18em;">Header</th><th>Value</th></tr>
+{{range $key, $value := .IAPHeaders}}
+<tr style="font-family: monospace;"><td>{{$key}}</td><td style="word-wrap: break-word;">{{$value}}</td></tr>
+{{end}}
+</table>
 
 <h2>Test URLs</h2>
 <p>The first one of these links should work. The rest should fail. See <a href="https://cloud.google.com/iap/docs/special-urls-and-headers-howto#testing_jwt_verification">Google's documentation for details</a>.</p>
@@ -42,7 +52,15 @@ func iapTestPage(w http.ResponseWriter, r *http.Request) {
 
 	email := iap.Email(r)
 
-	values := &iapValues{email, []iapTestCase{
+	// Add the magic X-Goog-* headers
+	iapHeaders := map[string]string{}
+	for key, value := range r.Header {
+		if strings.HasPrefix(key, "X-Goog-") {
+			iapHeaders[key] = value[0]
+		}
+	}
+
+	testCases := []iapTestCase{
 		// https://cloud.google.com/iap/docs/special-urls-and-headers-howto#testing_jwt_verification
 		{"NOT_SET", "A valid JWT."},
 		{"FUTURE_ISSUE", "Issue date is set in the future."},
@@ -50,7 +68,9 @@ func iapTestPage(w http.ResponseWriter, r *http.Request) {
 		{"ISSUER", "Incorrect issuer."},
 		{"AUDIENCE", "Incorrect audience."},
 		{"SIGNATURE", "Signed using an incorrect signer."},
-	}}
+	}
+
+	values := &iapValues{email, iapHeaders, testCases}
 
 	const prefix = "/_gcp_iap/secure_token_test/"
 	for i, test := range values.TestPages {

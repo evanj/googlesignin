@@ -29,6 +29,14 @@ The Go handler requires these cookies to be set, and validates the ID token on e
 
 The Google Cloud Identity-Aware Proxy lets you control access to web applications using Google's built-in access control. This package provides HTTP middleware to verify the signed header and extract the email address. This performs the same function as the googlesignin package, but for applications using IAP. This repository contains an example. It is running https://goiap-demo.appspot.com/, but you won't be able to access it (sorry!). This is simpler and probably more secure than relying on Google Sign-In, but only works on Google Cloud.
 
+### Simulate the Identity-Aware Proxy
+
+There are many environments that don't support the Identity-Aware Proxy. One of the newest is [Cloud Run](https://cloud.google.com/run/docs/), which has [built-in authentication, but only using `"Authorization: Bearer ..."` headers](https://cloud.google.com/run/docs/authenticating/end-users), so it won't work for web applications. As a hack, I created a proxy server which simulates the Identity-Aware Proxy. It uses this package to redirect requests that are not authenticated to force a user to sign in. If the request is authenticated, then it is proxied through to the original backend.
+
+Demo: https://proxytest-kgdmaenclq-ue.a.run.app/
+
+You can set the `HOSTED_DOMAIN` environment variable to only allow users from a specified Google account domain.
+
 
 ## Service Account Authentication
 

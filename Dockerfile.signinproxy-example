@@ -1,0 +1,33 @@
+# Multi-stage build for signinproxy
+# docker build . -f Dockerfile.signinproxy-example
+
+# Go build image
+FROM golang:1.12.9-stretch AS go_builder
+COPY . /go/src/github.com/evanj/googlesignin
+RUN go get -v github.com/evanj/googlesignin/signinproxy && go install -v github.com/evanj/googlesignin/signinproxy
+
+# Download pip: Debian's default Python 3 does not include pip
+FROM golang:1.12.9-stretch AS pip_downloader
+RUN curl --location https://github.com/pypa/pip/archive/19.2.3.tar.gz | tar -xvzf - --directory=/
+
+# Download Python dependencies
+# We save about ~13 MiB in image size by NOT creating a virtualenv
+FROM gcr.io/distroless/python3:debug AS py_dependencies
+COPY --from=pip_downloader /pip-19.2.3 /pip
+COPY signinproxy/example/requirements.txt /
+ENV PYTHONPATH=/pip/src
+RUN python3 -m pip install -r /requirements.txt --target=/app
+
+# Runtime image
+FROM gcr.io/distroless/python3
+COPY --from=go_builder /go/bin/signinproxy /
+COPY --from=py_dependencies /app /app
+COPY signinproxy/example/*.py /app
+
+WORKDIR /app
+# --preload: Slightly more efficient if it needs to restart workers, which happens at times
+ENTRYPOINT ["/signinproxy", "python3", "-m", "gunicorn.app.wsgiapp", \
+    "example:app", "--preload", "--workers=1", "--threads=8"]
+ENV PORT=8080
+EXPOSE 8080
+USER nobody

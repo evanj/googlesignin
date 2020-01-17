@@ -33,3 +33,20 @@ func TestNoHeader(t *testing.T) {
 		t.Error("expected OK:", recorder.Code)
 	}
 }
+
+func TestBadAudience(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+
+	// call Required with empty string and catch the panic
+	var recoveredPanic interface{}
+	func() {
+		defer func() {
+			recoveredPanic = recover()
+		}()
+		Required("", http.HandlerFunc(handler))
+	}()
+
+	if _, isString := recoveredPanic.(string); !isString {
+		t.Error("Required with empty audience should have paniced")
+	}
+}

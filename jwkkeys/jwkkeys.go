@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	jose "gopkg.in/square/go-jose.v2"
-	"gopkg.in/square/go-jose.v2/jwt"
+	jose "github.com/square/go-jose/v3"
+	"github.com/square/go-jose/v3/jwt"
 )
 
 const minCacheSeconds = 60

@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: golang:1.13.3-buster
+      - image: golang:1.13.6-buster
     working_directory: /go/src/github.com/evanj/googlesignin
     steps:
       - checkout

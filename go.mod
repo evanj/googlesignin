@@ -3,11 +3,9 @@ module github.com/evanj/googlesignin
 go 1.13
 
 require (
-	cloud.google.com/go v0.47.0 // indirect
-	github.com/stretchr/testify v1.4.0 // indirect
-	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550 // indirect
-	golang.org/x/net v0.0.0-20191021144547-ec77196f6094 // indirect
-	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
-	google.golang.org/appengine v1.6.5 // indirect
-	gopkg.in/square/go-jose.v2 v2.3.1
+	cloud.google.com/go v0.51.0 // indirect
+	github.com/square/go-jose/v3 v3.0.0-20191119004800-96c717272387
+	golang.org/x/crypto v0.0.0-20200115085410-6d4e4cb37c7d // indirect
+	golang.org/x/net v0.0.0-20200114155413-6afb5195e5aa // indirect
+	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 )

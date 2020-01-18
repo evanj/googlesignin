@@ -50,3 +50,43 @@ func TestBadAudience(t *testing.T) {
 		t.Error("Required with empty audience should have paniced")
 	}
 }
+
+func TestRequiredWithExceptions(t *testing.T) {
+	handlerCalled := false
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+	}
+	authenticatedHandler := RequiredWithExceptions(
+		"audience", http.HandlerFunc(handler), []string{"/health", "/xyz/"})
+
+	permittedPaths := []string{"/health", "/xyz/"}
+	for i, path := range permittedPaths {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		handlerCalled = false
+		authenticatedHandler.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Errorf("%d: path=%s should have status OK was %d", i, path, resp.Code)
+		}
+		if !handlerCalled {
+			t.Errorf("%d: handler should have been called", i)
+		}
+	}
+
+	forbiddenPaths := []string{"/", "/health/", "/health/x", "/healthy", "/healt", "/xyz", "/xyz/x"}
+	for i, path := range forbiddenPaths {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		handlerCalled = false
+		authenticatedHandler.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusForbidden {
+			t.Errorf("%d: path=%s should have status Forbidden was %d", i, path, resp.Code)
+		}
+		if handlerCalled {
+			t.Errorf("%d: handler should NOT have been called", i)
+		}
+	}
+
+}

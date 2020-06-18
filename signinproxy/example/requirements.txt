@@ -1,4 +1,2 @@
-Flask==1.1.1
-gunicorn==19.9.0
-# gunicorn requires setuptools; a future release will add this dependency to setup.py
-setuptools==41.2.0
+Flask==1.1.2
+gunicorn==20.0.4

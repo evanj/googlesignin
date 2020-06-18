@@ -13,13 +13,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// const jwtBearerGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer"
-// const oauthTokenURL = "https://www.googleapis.com/oauth2/v4/token"
-// const formContentType = "application/x-www-form-urlencoded"
-// const tokenExpiration = time.Hour
-// const headerKeyID = "kid"
-// const jwtType = "JWT"
-
 func main() {
 	urlString := flag.String("url", "http://localhost:8080/auth_demo", "URL to send bearer token")
 	audience := flag.String("audience", "", "Audience expected by the target URL")

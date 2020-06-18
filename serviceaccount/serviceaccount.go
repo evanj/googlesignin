@@ -63,8 +63,9 @@ func sourceFromDefault(ctx context.Context, targetAudience string, tokenURL stri
 // The targetAudience must be set to the OAuth client ID for the identity-aware proxy, or any other
 // string identifying the desired destination service. The credentials must be from a service
 // account key, since a user account and the Compute Engine metadata service do not expose the
-// private signing key.
+// private signing key. This returned source is cached using oauth2.ReuseTokenSource.
 func NewSourceFromDefault(ctx context.Context, targetAudience string) (oauth2.TokenSource, error) {
+
 	return newSourceFromDefaultURL(ctx, targetAudience, googleTokenURL)
 }
 
@@ -122,7 +123,7 @@ func (o *oidcTokenSource) Token() (*oauth2.Token, error) {
 	if !token.Valid() {
 		return nil, errors.New("serviceaccount: expired token returned from IDP")
 	}
-	log.Printf("got token from google expiry:%d %s", claims.Exp, expirationTime.UTC().Format(time.RFC3339))
+	log.Printf("got token from google expiry:%d=%s", claims.Exp, expirationTime.UTC().Format(time.RFC3339))
 	return token, nil
 }
 

@@ -38,6 +38,35 @@ Demo: https://proxytest-kgdmaenclq-ue.a.run.app/
 You can set the `HOSTED_DOMAIN` environment variable to only allow users from a specified Google account domain.
 
 
+## Google's public key caching/rotation policy
+
+* When fetching public keys from the URL, Google appears to return a `Cache-Control: max-page=` parameter that is a random value between [5h, 7h] from the current time. It seems to be that one server has a specific cache expiration time, since multiple requests to the same IP return that value, but requests to DIFFERENT IPs return different values.
+
+* Google uses a single public key for a LONG time: it looks like 7 days?
+
+* After Google stops using a public key, it keeps publishing it for about 5 days
+
+* Before using a new public key, Google publishes it well in advance: About 3 days before it uses it.
+
+* When transitioning to issue tokens with a new key, there is a period where both are being used. The transition takes about 30 minutes.
+
+### Specific timeline
+
+This follows a new key (k2) through its entire lifecycle.
+
+* `2020/06/16 21:29:40`: Publishing a new public key (serving 3 keys: old=k0, current=k1, next=k2)
+* `2020/06/17 04:44:40`: Reorders the keys: current=k1, next=k2, old=k0
+* `2020/06/17 16:44:40`: Removes old public key (serving 2 keys: current=k1, next=k2)
+* `2020/06/19 20:27:40` until `2020/06/19 20:53:40`: Issuing tokens with both keys (current=k1, next=k2)
+* `2020/06/24 21:29:40`: Publishing next key (serving 3 keys: old=k1, current=k2, next=k3)
+* `2020/06/25 04:44:40`: Reorders the keys: current=k2, next=k3, old=k1
+* `2020/06/25 16:44:40`: Removes old public key (serving 2 keys: current=k2, next=k3)
+* `2020/06/27 20:37:40` - `2020/06/27 20:49:40`: Issuing tokens with both keys (current=k2, next=k3)
+* `2020/07/02 21:29:40`: Publishing next key (serving 3 keys: old=k2, current=k3, next=k4)
+* `2020/07/03 04:44:40`: Reorders the keys: current=k3, next=k4, old=k2
+* `2020/07/03 16:44:40`: Removes old public key (serving 2 keys: current=k3, next=k4)
+
+
 ## Service Account Authentication
 
 To access resources on Google Cloud, humans use user accounts and software uses service accounts. You can re-use those accounts to authenticate other thing. The `serviceaccount` package contains code to make this easy. This lets you use service accounts to send requests to Identity-Aware Proxy protected pages, or to use Google Service Accounts to authenicate other things, like gRPC services. To create a service from Google credentials, use `serviceaccount.NewSourceFromDefault`. To require Google credentials to access server, use `serviceaccount.NewAuthenticator`.
@@ -56,7 +85,9 @@ If you are using IAP, the audience (aud) field is the Client ID provided by Goog
 I have a demo service that will accept credentials from any Google service account. If you [visit the page](https://serviceaccount-dot-gosignin-demo.appspot.com), it will tell you that you are not authenticated. Send it an authorized request with:
 
 ```
-GOOGLE_APPLICATION_CREDENTIALS=[service account key.json] go run serviceaccount/exampleclient/exampleclient.go --audience=https://example.evanjones.ca https://serviceaccount-dot-gosignin-demo.appspot.com
+GOOGLE_APPLICATION_CREDENTIALS=[service account key.json] go run ./serviceaccount/exampleclient/exampleclient.go \
+  --audience=https://example.evanjones.ca \
+  --url=https://serviceaccount-dot-gosignin-demo.appspot.com
 ```
 
 

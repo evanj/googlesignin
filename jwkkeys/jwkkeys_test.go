@@ -55,7 +55,7 @@ func TestCachedKeys(t *testing.T) {
 	if len(keys.Keys) != 0 {
 		t.Error(keys)
 	}
-	expiresDuration := cachedKeys.expires.Sub(time.Now())
+	expiresDuration := time.Until(cachedKeys.expires)
 	if expiresDuration < 12340*time.Second {
 		t.Errorf("incorrect expires duration: %v ; expires %v", expiresDuration, cachedKeys.expires)
 	}

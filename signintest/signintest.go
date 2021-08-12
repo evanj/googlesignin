@@ -1,3 +1,4 @@
+// Package signintest provides shared test code for testing signing in with Google accounts.
 package signintest
 
 import (

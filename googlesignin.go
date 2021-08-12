@@ -1,3 +1,6 @@
+// Package googlesignin implements a Go API to sign in users with Google accounts. It attempts
+// to use the most up to date "recommended" API from Google, since they seem to decide to change
+// it every few years.
 package googlesignin
 
 import (
@@ -13,7 +16,6 @@ import (
 
 const idTokenCookieName = "__id"
 const accessTokenCookieName = "__access"
-const minCacheSeconds = 60
 const defaultSignInPath = "/__start_signin"
 const defaultScopes = "openid email"
 const defaultSecureCookie = "secure;"

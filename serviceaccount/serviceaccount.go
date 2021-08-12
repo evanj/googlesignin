@@ -1,10 +1,11 @@
+// Package serviceaccount authenticates requests using Google Cloud service accounts, on both
+// the client and server side.
 package serviceaccount
 
 import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -19,6 +20,8 @@ import (
 	"github.com/evanj/googlesignin/jwkkeys"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	//lint:ignore SA1019 oauth2/jws is deprecated but widely used
 	"golang.org/x/oauth2/jws"
 )
 
@@ -142,19 +145,6 @@ func newSourceFromDefaultURL(ctx context.Context, targetAudience string, oauthTo
 
 	// wrap the source in a caching/refreshing layer
 	return oauth2.ReuseTokenSource(token, source), nil
-}
-
-func parseToken(token string) error {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("serviceaccount: token has wrong number of parts: %d !=3", len(parts))
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return err
-	}
-	fmt.Println("XXXXX", string(decoded))
-	return nil
 }
 
 type tokenResponse struct {

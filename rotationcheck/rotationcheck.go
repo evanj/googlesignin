@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/evanj/googlesignin/serviceaccount"
+
+	//lint:ignore SA1019 oauth2/jws is deprecated but widely used
 	"golang.org/x/oauth2/jws"
 )
 
@@ -59,6 +61,9 @@ func unverifiedPartsFromJWT(jwt string) (jwtParts, error) {
 	claimsString := parts[1]
 	claims := &jws.ClaimSet{}
 	err = base64JSONUnmarshal(claimsString, claims)
+	if err != nil {
+		return jwtParts{}, err
+	}
 
 	expTime := time.Unix(claims.Exp, 0).UTC()
 
@@ -154,7 +159,7 @@ func main() {
 				log.Printf("ERROR: %s", err.Error())
 				continue
 			}
-			diff := parts.Expiration.Sub(time.Now())
+			diff := time.Until(parts.Expiration)
 			log.Printf("public key expires=%s (%s) kids=%s",
 				parts.Expiration.Format(time.RFC3339), diff.String(), strings.Join(parts.KeyIDs, ","))
 		}

@@ -3,25 +3,23 @@
 
 set -x -euf -o pipefail
 
-go test -mod=readonly -race -count=10 ./...
+go test -race -count=10 ./...
 
 # go test only checks some vet warnings; check all
-go vet -mod=readonly ./...
+go vet ./...
 
-# TODO: Use tools.go
-(cd /tmp && go get golang.org/x/lint/golint)
+# cd /tmp to not change go.mod/go.sum ; TODO: Use tools.go:
+# https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
+(cd /tmp && go get golang.org/x/tools/cmd/goimports golang.org/x/lint/golint honnef.co/go/tools/cmd/staticcheck)
 golint --set_exit_status ./...
+staticcheck --checks=all ./...
 
-diff -u <(echo -n) <(gofmt -d .)
-
-# only check in "go mod tidy" go.mod/go.sum
-# TODO there must be an easier way?
-cp go.sum go.sum.orig
-cp go.mod go.mod.orig
+# require that we use goimports and go mod tidy. TODO: there must be an easier way?
+go list ./... | sed 's|github.com/evanj/googlesignin|.|' | xargs goimports -w
 go mod tidy
-CHANGED=$(diff -u go.sum.orig go.sum && diff -u go.mod.orig go.mod)
+CHANGED=$(git status --porcelain --untracked-files=no)
 if [ -n "${CHANGED}" ]; then
-    echo "ERROR go mod tidy changed go.mod or go.sum:" > /dev/stderr
+    echo "ERROR files were changed:" > /dev/stderr
     echo "$CHANGED" > /dev/stderr
     exit 10
 fi

@@ -1,7 +1,9 @@
 # Go build image
-FROM golang:1.14.4-buster AS go_builder
+FROM golang:1.16.7-buster AS go_builder
 COPY . /go/src/cloudrundebug
-RUN go install -v /go/src/cloudrundebug
+WORKDIR /go/src/cloudrundebug
+RUN go mod init github.com/evanj/googlesignin/cloudrundebug && \
+	go install -v /go/src/cloudrundebug
 
 # Runtime image
 FROM gcr.io/distroless/base-debian10

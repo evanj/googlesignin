@@ -1,3 +1,4 @@
-runtime: go113
+runtime: go115
+
 env_variables:
   AUDIENCE: /projects/446336824806/apps/goiap-demo

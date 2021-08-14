@@ -10,8 +10,10 @@ import (
 	"github.com/evanj/googlesignin/iap"
 )
 
+const tokenTestPath = "/secure_token_test"
+
 type iapTestCase struct {
-	Path        string
+	URL         string
 	Description string
 }
 type iapValues struct {
@@ -39,7 +41,7 @@ var iapTemplate = template.Must(template.New("page1").Parse(`<!doctype html><htm
 <p>The first one of these links should work. The rest should fail. See <a href="https://cloud.google.com/iap/docs/special-urls-and-headers-howto#testing_jwt_verification">Google's documentation for details</a>.</p>
 <ul>
 {{range .TestPages}}
-<li><a href="{{.Path}}">{{.Path}}</a>: {{.Description}}</li>
+<li><a href="{{.URL}}">{{.URL}}</a>: {{.Description}}</li>
 {{end}}
 </ul>
 </body></html>`))
@@ -47,6 +49,10 @@ var iapTemplate = template.Must(template.New("page1").Parse(`<!doctype html><htm
 func iapTestPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "only GET is supported", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -72,9 +78,9 @@ func iapTestPage(w http.ResponseWriter, r *http.Request) {
 
 	values := &iapValues{email, iapHeaders, testCases}
 
-	const prefix = "/_gcp_iap/secure_token_test/"
+	const suffix = "?gcp-iap-mode=SECURE_TOKEN_TEST&iap-secure-token-test-type="
 	for i, test := range values.TestPages {
-		values.TestPages[i].Path = prefix + test.Path
+		values.TestPages[i].URL = tokenTestPath + suffix + test.URL
 	}
 
 	err := iapTemplate.Execute(w, values)
@@ -102,7 +108,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", iapTestPage)
-	mux.HandleFunc("/_gcp_iap/", iapTokenTest)
+	mux.HandleFunc(tokenTestPath, iapTokenTest)
 
 	authenticatedHandler := iap.Required(audience, mux)
 	log.Fatal(http.ListenAndServe(":"+port, authenticatedHandler))

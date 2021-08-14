@@ -1,6 +1,10 @@
-runtime: go116
+runtime: go115
 
 handlers:
 - url: /.*
   script: auto
   secure: always
+
+env_variables:
+  # client id for the gosignin-demo.appspot.com domain; Replace with your own
+  CLIENT_ID: "660565085864-ha1576tpc1hfj3fvp8nrp5rft8cfk2gu.apps.googleusercontent.com"

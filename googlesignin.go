@@ -6,34 +6,50 @@ package googlesignin
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/evanj/googlesignin/jwkkeys"
 )
 
-const idTokenCookieName = "__id"
-const accessTokenCookieName = "__access"
+const idTokenCookieName = "__gosignin_id"
 const defaultSignInPath = "/__start_signin"
-const defaultScopes = "openid email"
-const defaultSecureCookie = "secure;"
+const defaultSignOutPath = "/__signout"
+const defaultRedirect = "/"
+const redirectCookieName = "__gosignin_location"
+const redirectCookieExpiration = time.Hour
+const htmlUTF8ContentType = "text/html;charset=utf-8"
+const forwardedProtoHeader = "X-Forwarded-Proto"
+const forwardedSchemeHeader = "X-Forwarded-Scheme"
 
-type contextKey int
+// See: https://developers.google.com/identity/gsi/web/reference/html-reference#id-token-handler-endpoint
+const idTokenFormKey = "credential"
+const csrfFormKey = "g_csrf_token"
 
-const authenticatorKey = contextKey(1)
+// context.WithValue recommends type struct{}. See:
+// https://github.com/golang/go/issues/33742
+type contextKey struct{}
+
+var authenticatorKey = contextKey{}
 
 // Authenticator is an HTTP server middleware for requiring Google Sign-In.
 type Authenticator struct {
-	// Space-separated OAuth scopes to be appended. By default we request "openid email". See:
-	// https://developers.google.com/identity/protocols/googlescopes
-	ExtraScopes string
 	// If set, the Google accounts must belong to this domain. See:
 	// https://developers.google.com/identity/protocols/OpenIDConnect#hd-param
 	HostedDomain string
-	// The path to the page used to start and complete Google Sign In. Defaults to /__start_signin.
+	// The path used to start and complete Google Sign In. Defaults to "/__start_signin".
+	// Must start with /.
 	SignInPath string
+	// The path used to sign users out. Defaults to "/__signout". Must start with /.
+	SignOutPath string
+	// The path users will be redirected to after signing out, or when loading the sign in page
+	// directly without a redirect (e.g. sometimes when hitting back). Defaults to "/".
+	DefaultRedirect string
 	// If true, users will be redirected to log in if they are not. Otherwise they get a failed
 	// response.
 	RedirectIfNotSignedIn bool
@@ -41,29 +57,47 @@ type Authenticator struct {
 	// Gets keys to validate tokens. Should not be changed except in tests.
 	CachedKeys jwkkeys.Set
 
-	clientID           string
-	signedInPath       string
-	publicPaths        map[string]bool
-	secureCookieOption string
+	clientID        string
+	publicPaths     map[string]bool
+	insecureCookies bool
 }
 
 // New creates an Authenticator, configured with the provided OAuth configuration. The
-// middleware will serve the page to start the sign in publicly at signInPath. Once successful,
-// it will redirect back to signedInPath.
-func New(clientID string, signedInPath string) *Authenticator {
-	return &Authenticator{
-		defaultScopes, "", defaultSignInPath, false,
+// middleware will serve the page to start the sign in publicly at signInPath.
+func New(clientID string) *Authenticator {
+	return &Authenticator{"", defaultSignInPath, defaultSignOutPath, defaultRedirect, false,
 		jwkkeys.NewGoogle(),
-		clientID, signedInPath,
-		make(map[string]bool), defaultSecureCookie,
+		clientID,
+		make(map[string]bool), false,
 	}
 }
 
-// PermitInsecureCookies configures the Authenticator to send cookies over HTTP connections. This
-// should only be used for localhost testing. In production, you should only send the cookie over
-// HTTPS since it contains sensitive user data.
+// PermitInsecureCookies configures the Authenticator to allow sending cookies over HTTP
+// connections (not setting the Secure cookie option). This should only be used for localhost
+// testing. In production, you should only send cookies over HTTPS since they contain sensitive
+// user data.
 func (a *Authenticator) PermitInsecureCookies() {
-	a.secureCookieOption = ""
+	a.insecureCookies = true
+}
+
+func getOriginalRequestURL(r *http.Request) *url.URL {
+	originalURL := *r.URL
+	originalURL.Host = r.Host
+	// set the scheme with headers, if they exist
+	if r.Header.Get(forwardedProtoHeader) != "" {
+		originalURL.Scheme = r.Header.Get(forwardedProtoHeader)
+	} else if r.Header.Get(forwardedSchemeHeader) != "" {
+		originalURL.Scheme = r.Header.Get(forwardedSchemeHeader)
+	} else if r.TLS != nil {
+		originalURL.Scheme = "https"
+	} else {
+		// I'm not sure r.URL.Scheme is ever filled in, but try it in case
+		originalURL.Scheme = r.URL.Scheme
+		if originalURL.Scheme == "" {
+			originalURL.Scheme = "http"
+		}
+	}
+	return &originalURL
 }
 
 // Renders the Google sign-in page, which will eventually set the ID token cookie and redirect
@@ -73,61 +107,177 @@ func (a *Authenticator) startSignInPage(w http.ResponseWriter, r *http.Request) 
 	// ending up in a redirect loop. We trust the X-Forwarded-Proto header, even though it could be
 	// added by the original client rather than a proxy, because this is an attempt to prevent
 	// configuration mistakes, not a security measure
-	servedOverHTTPS := r.URL.Scheme == "https" || r.Header.Get("X-Forwarded-Proto") == "https"
-	if a.secureCookieOption != "" && !servedOverHTTPS {
-		log.Println("ERROR: refusing to serve sign in page over HTTP; Use PermitInsecureCookies to allow")
+	servedOverHTTPS := r.URL.Scheme == "https" || r.Header.Get(forwardedProtoHeader) == "https"
+	if !servedOverHTTPS && !a.insecureCookies {
+		log.Println("ERROR: refusing to serve sign in page over HTTP; Use PermitInsecureCookies() to allow")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	data := &signInValues{a.clientID, a.signedInPath, idTokenCookieName, accessTokenCookieName,
-		defaultScopes + " " + a.ExtraScopes, a.HostedDomain, a.secureCookieOption}
+	if r.Method == http.MethodPost {
+		err := a.handleSignInPost(w, r)
+		if err != nil {
+			log.Printf("ERROR: handling sign-in post: %s", err.Error())
+			w.Header().Set("Content-Type", htmlUTF8ContentType)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(failedLoginPage))
+		}
+		return
+	} else if r.Method != http.MethodGet {
+		http.Error(w, "only POST and GET HTTP methods are supported", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// make sign in URL absolute: The JS library warns if we do not
+	relativeSignInURL, err := url.Parse(a.SignInPath)
+	if err != nil {
+		log.Printf("invalid sign in path: %s", err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	requestURL := getOriginalRequestURL(r)
+	absoluteSignInURL := requestURL.ResolveReference(relativeSignInURL)
+	data := &signInValues{a.clientID, absoluteSignInURL.String()}
 	buf := &bytes.Buffer{}
-	err := signInTemplate.Execute(buf, data)
+	err = signInTemplate.Execute(buf, data)
 	if err != nil {
 		log.Printf("rendering sign in page failed: %s", err.Error())
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html;charset=utf-8")
+	w.Header().Set("Content-Type", htmlUTF8ContentType)
 	buf.WriteTo(w)
 }
 
-// GetEmail returns the email for a request. The error reports details that should not be returned
-// to the client. However, it will not leak truly private data (e.g. the token).
+func (a *Authenticator) signOutPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "only the GET HTTP method is supported", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// delete any cookies that might be set
+	// TODO: check for existence before deleting?
+	http.SetCookie(w, &http.Cookie{Name: idTokenCookieName, MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: redirectCookieName, MaxAge: -1})
+
+	// check if the user is signed in
+	validatedToken, err := a.GetIDToken(r)
+	if err != nil {
+		// not signed in: Just redirect
+		log.Printf("warning: user was not signed in; redirecting: %s", err.Error())
+		http.Redirect(w, r, a.DefaultRedirect, http.StatusSeeOther)
+		return
+	}
+
+	buf := &bytes.Buffer{}
+	data := signOutValues{a.clientID, validatedToken.StandardClaims.Subject, a.DefaultRedirect}
+	err = signOutTemplate.Execute(buf, data)
+	if err != nil {
+		log.Printf("rendering sign out page failed: %s", err.Error())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", htmlUTF8ContentType)
+	buf.WriteTo(w)
+}
+
+func (a *Authenticator) handleSignInPost(w http.ResponseWriter, r *http.Request) error {
+	// delete any redirect cookie even if there is an error
+	http.SetCookie(w, &http.Cookie{Name: redirectCookieName, MaxAge: -1})
+
+	csrfForm := r.PostFormValue(csrfFormKey)
+	csrfCookie, err := r.Cookie(csrfFormKey)
+	if err != nil {
+		return fmt.Errorf("failed to get CSRF cookie name=%s: %w", csrfFormKey, err)
+	}
+	if csrfForm != csrfCookie.Value {
+		return fmt.Errorf("csrf form=%#v did not match cookie=%#v", csrfForm, csrfCookie.Value)
+	}
+
+	idToken := r.PostFormValue(idTokenFormKey)
+	validatedToken, err := a.validateIDToken(idToken)
+	if err != nil {
+		return fmt.Errorf("id token in form key=%s is not valid: %w", idTokenFormKey, err)
+	}
+
+	redirectPath := a.DefaultRedirect
+	if redirectCookie, err := r.Cookie(redirectCookieName); err == nil {
+		decoded, err := base64.RawURLEncoding.DecodeString(redirectCookie.Value)
+		if err != nil {
+			return err
+		}
+		redirectPath = string(decoded)
+	} else {
+		// this can happen if the user hits back, since we already deleted the location cookie
+		log.Printf("warning: failed getting redirect cookie name=%s: %s; using default redirect", redirectCookieName, err)
+	}
+	parsedURL, err := url.Parse(redirectPath)
+	if err != nil {
+		return err
+	}
+	if parsedURL.IsAbs() || parsedURL.Host != "" {
+		return fmt.Errorf("redirect url=%#v is absolute; must be relative", redirectPath)
+	}
+
+	// everything worked! Set the ID token in a cookie and redirect
+	idTokenCookie := &http.Cookie{
+		Name:     idTokenCookieName,
+		Value:    idToken,
+		Expires:  validatedToken.StandardClaims.Expiry.Time(),
+		SameSite: http.SameSiteStrictMode,
+		HttpOnly: true,
+		Secure:   !a.insecureCookies,
+	}
+	http.SetCookie(w, idTokenCookie)
+	http.Redirect(w, r, redirectPath, http.StatusSeeOther)
+	return nil
+}
+
+// validateIDToken returns the parsed token if it is valid.
+func (a *Authenticator) validateIDToken(idToken string) (*jwkkeys.ValidatedGoogleToken, error) {
+	validatedToken, err := jwkkeys.ValidateGoogleClaims(
+		a.CachedKeys, idToken, a.clientID, jwkkeys.GoogleIssuers)
+	if err != nil {
+		return nil, err
+	}
+
+	// extra validation of the Google-specific claims
+	if a.HostedDomain != "" && a.HostedDomain != validatedToken.GoogleClaims.HostedDomain {
+		return nil, fmt.Errorf("hosted domain does not match: %#v != %#v",
+			a.HostedDomain, validatedToken.GoogleClaims.HostedDomain)
+	}
+	if validatedToken.GoogleClaims.Email == "" {
+		return nil, fmt.Errorf("invalid email: %s", validatedToken.GoogleClaims.Email)
+	}
+	return validatedToken, nil
+}
+
+// GetEmail returns the email for a request if it is signed in. This can be used on public pages.
+// The error reports details that should not be returned to the client.
 func (a *Authenticator) GetEmail(r *http.Request) (string, error) {
 	// Parse the ID token from the cookie
 	cookie, err := r.Cookie(idTokenCookieName)
 	if err == http.ErrNoCookie {
 		return "", fmt.Errorf("no ID token cookie found")
 	}
-	claims, err := jwkkeys.ValidateGoogleClaims(
-		a.CachedKeys, cookie.Value, a.clientID, jwkkeys.GoogleIssuers)
+	token, err := a.validateIDToken(cookie.Value)
 	if err != nil {
 		return "", err
 	}
 
-	// extra validation of the Google-specific claims
-	if a.HostedDomain != "" && a.HostedDomain != claims.HostedDomain {
-		return "", fmt.Errorf("hosted domain does not match %s != %s",
-			a.HostedDomain, claims.HostedDomain)
-	}
-	if claims.Email == "" {
-		return "", fmt.Errorf("invalid email: %s", claims.Email)
-	}
-
-	return claims.Email, nil
+	return token.GoogleClaims.Email, nil
 }
 
-// GetAccessToken returns the access token for a request. The error reports details that should not
-// be returned to the client. However, it will not leak truly private data (e.g. the token).
-func (a *Authenticator) GetAccessToken(r *http.Request) (string, error) {
-	cookie, err := r.Cookie(accessTokenCookieName)
+// GetIDToken returns the valid ID token for an authenticated request. This can be used on public
+// pages. The error reports details that should not be returned to the client.
+func (a *Authenticator) GetIDToken(r *http.Request) (*jwkkeys.ValidatedGoogleToken, error) {
+	cookie, err := r.Cookie(idTokenCookieName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return cookie.Value, nil
+	return a.validateIDToken(cookie.Value)
 }
 
 // MustGetEmail returns the authenticated user's email address, or panics if the user is not signed
@@ -146,18 +296,30 @@ func (a *Authenticator) MustGetEmail(r *http.Request) string {
 	return email
 }
 
+// IsSignedIn returns true if the user is signed in to an accepted Google account. This can be used
+// on public pages, for example to conditionally display content.
+func (a *Authenticator) IsSignedIn(r *http.Request) bool {
+	_, err := a.GetEmail(r)
+	return err == nil
+}
+
 // RequireSignIn wraps an existing http.Handler to require a user to be signed in. It will fail
 // the request, or will redirect the user to sign in.
 func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// TODO: Do a single hash lookup for all known URLs
+		if r.URL.Path == a.SignInPath {
+			a.startSignInPage(w, r)
+			return
+		}
+		if r.URL.Path == a.SignOutPath {
+			a.signOutPage(w, r)
+			return
+		}
+
 		if a.isPublic(r.URL.Path) {
 			// public request: pass through
 			handler.ServeHTTP(w, r)
-			return
-		}
-		if r.URL.Path == a.SignInPath {
-			// serve the sign in page
-			a.startSignInPage(w, r)
 			return
 		}
 
@@ -166,11 +328,24 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 		if err != nil {
 			log.Printf("%s: not authenticated: %s", r.URL.String(), err.Error())
 			if r.Method == http.MethodGet && a.RedirectIfNotSignedIn {
-				redirectPath := a.SignInPath + "#" + r.URL.Path
+				// TODO: Add test for query parameter redirects
+				redirectPath := r.URL.Path
 				if r.URL.RawQuery != "" {
 					redirectPath += "?" + r.URL.RawQuery
 				}
-				http.Redirect(w, r, redirectPath, http.StatusSeeOther)
+
+				// base64 encoded: Path could contain UTF-8 characters
+				// TODO: Encrypt this cookie? Unclear to me if this matters, but it wouldn't hurt?
+				redirectCookie := &http.Cookie{
+					Name:     redirectCookieName,
+					Value:    base64.RawURLEncoding.EncodeToString([]byte(redirectPath)),
+					MaxAge:   int(redirectCookieExpiration.Seconds()),
+					SameSite: http.SameSiteStrictMode,
+					HttpOnly: true,
+					Secure:   !a.insecureCookies,
+				}
+				http.SetCookie(w, redirectCookie)
+				http.Redirect(w, r, a.SignInPath, http.StatusSeeOther)
 			} else {
 				http.Error(w, "forbidden", http.StatusForbidden)
 			}
@@ -187,11 +362,10 @@ func (a *Authenticator) RequireSignIn(handler http.Handler) http.Handler {
 // InsecureMakeAuthenticated makes a new *http.Request that is authenticated. It copies r and
 // sets idToken and accessToken in the correct cookies, and marks the request as valid for
 // MustGetEmail. This should only be called by tests.
-func InsecureMakeAuthenticated(r *http.Request, idToken string, accessToken string) *http.Request {
+func InsecureMakeAuthenticated(r *http.Request, idToken string) *http.Request {
 	ctxAuthenticated := context.WithValue(r.Context(), authenticatorKey, authenticatorKey)
 	rWithContext := r.WithContext(ctxAuthenticated)
 	rWithContext.AddCookie(&http.Cookie{Name: idTokenCookieName, Value: idToken})
-	rWithContext.AddCookie(&http.Cookie{Name: accessTokenCookieName, Value: accessToken})
 	return rWithContext
 }
 
@@ -208,86 +382,61 @@ func (a *Authenticator) isPublic(path string) bool {
 
 type signInValues struct {
 	ClientID              string
-	LoggedInRedirect      string
-	IDTokenCookieName     string
-	AccessTokenCookieName string
-	Scopes                string
-	HostedDomain          string
-	SecureCookieOption    string
+	SignInPostAbsoluteURL string
 }
 
+// TODO: Make auto-select an option?
 var signInTemplate = template.Must(template.New("signin").Parse(`<!doctype html><html><head>
-<title>Google Sign-In Redirecting ...</title>
-<script src="https://apis.google.com/js/platform.js?onload=init" async defer></script>
-<script>
-function init() {
-	gapi.load('auth2', function() {
-		const sessionStorageKey = "__after_redirect";
+<title>Sign In With Google</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div id="g_id_onload"
+	data-client_id="{{.ClientID}}"
+	data-login_uri="{{.SignInPostAbsoluteURL}}"
+	data-prompt_parent_id="g_id_onload"
+	data-cancel_on_tap_outside="false"
+	data-ux_mode="redirect"
+	data-auto_select="true">
+</div>
+</body></html>
+`))
 
-		// Returns the path we should redirect BACK to, if we are authenticated, or the empty string.
-		function getRedirect() {
-			const hash = window.location.hash;
-			if (hash.startsWith("#/")) {
-				return hash.substring(2);
-			}
+const failedLoginPage = `<!doctype html><html><head>
+<title>Google Sign-In Failed</title>
+</head>
+<body>
+<p>Failed to sign in with a Google account.</p>
+</body></html>`
 
-			const sessionRedirect = sessionStorage.getItem(sessionStorageKey);
-			if (sessionRedirect !== null && sessionRedirect[0] === "/") {
-				sessionStorage.removeItem(sessionStorageKey);
-				return sessionRedirect;
-			}
-
-			return "{{.LoggedInRedirect}}";
-		}
-
-		function saveRedirectFromHash() {
-			const hash = window.location.hash;
-			if (hash[0] === "/") {
-				sessionStorage.setItem(sessionStorageKey, hash);
-			}
-		}
-
-		function handleSignedIn(user) {
-			const response = user.getAuthResponse();
-			document.cookie = "{{.IDTokenCookieName}}=" + response.id_token +
-				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
-			document.cookie = "{{.AccessTokenCookieName}}=" + response.access_token +
-				";path=/;samesite=lax;{{.SecureCookieOption}}max-age=" + response.expires_in;
-			// use replace so this redirect does not appear when the user clicks back
-			window.location.replace(getRedirect());
-		}
-
-		const initPromise = gapi.auth2.init({
-			client_id: "{{.ClientID}}",
-			scope: "{{.Scopes}}",
-			fetch_basic_profile: false,
-			hosted_domain: "{{.HostedDomain}}",
-			ux_mode: "redirect",
-		});
-
-		initPromise.then(function(auth) {
-			if (auth.isSignedIn.get()) {
-				const user = auth.currentUser.get();
-				handleSignedIn(user);
-			} else {
-				saveRedirectFromHash();
-
-				const signInPromise = auth.signIn();
-				signInPromise.then(function(user) {
-					// We are using ux_mode:redirect; we should not get here but just in case:
-					handleSignedIn(user);
-				}).catch(function (e) {
-					console.log("error", e);
-				});
-			}
-		}).catch(function(e) {
-			console.log("google auth error", e);
-		});
-	});
+type signOutValues struct {
+	ClientID     string
+	UserID       string
+	RedirectPath string
 }
+
+var signOutTemplate = template.Must(template.New("signout").Parse(`<!doctype html><html><head>
+<title>Signing out ...</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+function revokedCallback(revocationResponse) {
+	if (!!revocationResponse.error) {
+		console.log("warning: revocation failed:", revocationResponse.error);
+	}
+	console.log("revoked?", revocationResponse);
+
+	// redirect even if failed; use replace so this redirect does not appear when the user clicks back
+	window.location.replace("{{.RedirectPath}}");
+}
+
+window.onload = function() {
+	console.log("onload");
+	google.accounts.id.initialize({client_id: "{{.ClientID}}"});
+	google.accounts.id.revoke("{{.UserID}}", revokedCallback);
+};
 </script>
 </head>
 <body>
-<p>Redirecting ...</p>
+<p>Signing out ...</p>
 </body></html>
 `))

@@ -1,10 +1,10 @@
 # Google Sign-In
 
-This library provides Go HTTP middleware to require Google Sign-In in a web application, and/or to use the Google Cloud Identity Aware Proxy.
+This library provides Go HTTP middleware to require Google Sign-In in a web application, and/or to use the Google Cloud Identity Aware Proxy. This library tries to be as easy to use as possible, and to use secure defaults. It verifies ID tokens on the server side using Google's public keys and [Square's go-jose library](https://github.com/square/go-jose). It requires users to be logged in for all endpoints, except endpoints that are explicitly made public. This is particularly useful for "internal" applications that should be available to users in your domain, but not the public. Just use the `RequiresSignIn` wrapper for all your endpoints, set the `HostedDomain` argument, and you are done! This version cannot be used to request OAuth2 access tokens, at least as of 2021-08-13. Use the `googlesignin/oauth2` version of this API for that.
 
-Google currently recommends web applications use [their JavaScript library to implement "sign in with Google."](https://developers.google.com/identity/sign-in/web/) I was curious about this compares to the older OAuth redirect approach. This library tries to be as easy to use as possible, and implements secure defaults. It verifies ID tokens on the server side using Google's public keys and Square's JOSE library. It requires users to be logged in for all endpoints, except endpoints that are explicitly made public.
+I've also added some preliminary support for the [GCP Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview), and authenticating requests using Google Cloud Service accounts as both a client and server.
 
-This is particularly useful for "internal" applications that should be available to users in your domain, but not the public. Just use the `RequiresSignIn` wrapper for all your endpoints, set the `HostedDomain` argument, and you are done!
+Google previously recommended web applications use [the "Sign In With Google" JavaScript library, also known as "Google Sign-In Javascript Platform Library"](https://developers.google.com/identity/sign-in/web/). I initially wrote this because I was curious how it compares to the older OAuth redirect approach. In [August 2021, Google announced that this library will stop working after March 2023](https://developers.googleblog.com/2021/08/gsi-jsweb-deprecation.html). This library was updated at that time to the newer [Google Identity Services](https://developers.google.com/identity/gsi/web).
 
 
 ## Example
@@ -13,9 +13,10 @@ The example is running at https://gosignin-demo.appspot.com/. It has a main page
 
 To run it yourself:
 
-1. Create a new Google Sign-In OAuth client ID and secret. [Follow Google's instructions to do this](https://developers.google.com/identity/sign-in/web/sign-in#before_you_begin).
-2. Configure the OAuth client to permit `https://YOURDOMAIN` as an *Authorized JavaScript origin* and `https://YOURDOMAIN/__start_signin` as an *Authorized redirect URI*.
-3. `CLIENT_ID=YOURID go run github.com/evanj/googlesignin/example`
+1. Create a new Google Sign-In OAuth client ID and secret. [Follow Google's instructions to do this](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
+2. Configure the OAuth client to permit `https://YOURDOMAIN` as an *Authorized JavaScript origin* and `https://YOURDOMAIN/__start_signin` as an *Authorized redirect URI*. For localhost testing, you must add both `http://localhost` and `http://localhost:PORT` to *Authorized JavaScript origin*.
+3. Run the example on YOURDOMAIN: `CLIENT_ID=YOURID go run github.com/evanj/googlesignin/example`
+4. Visit `https://YOURDOMAIN/` in your browser and click the links.
 
 
 ## Design Overview / Notes
@@ -40,11 +41,13 @@ You can set the `HOSTED_DOMAIN` environment variable to only allow users from a 
 
 ## Google's public key caching/rotation policy
 
+The `rotationcheck` program periodically loads Google's public keys, and checks their cache expiration. I used this to reverse engineer their key caching and rotation policies.
+
 * When fetching public keys from the URL, Google appears to return a `Cache-Control: max-page=` parameter that is a random value between [5h, 7h] from the current time. It seems to be that one server has a specific cache expiration time, since multiple requests to the same IP return that value, but requests to DIFFERENT IPs return different values.
 
-* Google uses a single public key for a LONG time: it looks like 7 days?
+* Google uses a single public key for a LONG time: it looks like 7 days.
 
-* After Google stops using a public key, it keeps publishing it for about 5 days
+* After Google stops using a public key, it keeps publishing it for about 5 days.
 
 * Before using a new public key, Google publishes it well in advance: About 3 days before it uses it.
 

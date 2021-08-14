@@ -30,7 +30,7 @@ func (r *RequestAuthenticator) InsecureMakeAuthenticated(
 	request *http.Request, email string,
 ) *http.Request {
 	idToken := InsecureToken(ClientID, jwkkeys.GoogleIssuers[0], email, r.authenticator.HostedDomain)
-	return googlesignin.InsecureMakeAuthenticated(request, idToken, "fake_access_token")
+	return googlesignin.InsecureMakeAuthenticated(request, idToken)
 }
 
 type staticKeySet struct {

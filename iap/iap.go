@@ -36,18 +36,18 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	headerValue := r.Header.Get(jwtHeaderName)
-	claims, err := jwkkeys.ValidateGoogleClaims(m.cachedKeys, headerValue, m.audience, issuer)
+	validatedToken, err := jwkkeys.ValidateGoogleClaims(m.cachedKeys, headerValue, m.audience, issuer)
 	if err != nil {
 		log.Printf("ERROR: failed verifying JWT: %s", err.Error())
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if claims.Email == "" {
+	if validatedToken.GoogleClaims.Email == "" {
 		log.Println("ERROR: no email claim")
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}
 
-	ctxWithEmail := context.WithValue(r.Context(), emailKey{}, claims.Email)
+	ctxWithEmail := context.WithValue(r.Context(), emailKey{}, validatedToken.GoogleClaims.Email)
 	rWithCtx := r.WithContext(ctxWithEmail)
 	m.originalHandler.ServeHTTP(w, rWithCtx)
 }

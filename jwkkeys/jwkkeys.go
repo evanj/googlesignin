@@ -18,14 +18,13 @@ import (
 
 const minCacheSeconds = 60
 
-// https://developers.google.com/identity/sign-in/web/backend-auth#verify-the-integrity-of-the-id-token
-// https://accounts.google.com/.well-known/openid-configuration
+// TODO: Parse this out of the discovery URL: https://accounts.google.com/.well-known/openid-configuration
 const googleJWKURL = "https://www.googleapis.com/oauth2/v3/certs"
 
 // GoogleIssuers contains the value of the iss field in Google ID tokens. When using Google Sign-In
 // via the JavaScript API, it seems to use accounts.google.com, but when using a service account,
 // it uses https://accounts.google.com.
-// See: https://developers.google.com/identity/protocols/OpenIDConnect#validatinganidtoken
+// See: https://developers.google.com/identity/protocols/oauth2/openid-connect#validatinganidtoken
 var GoogleIssuers = []string{"accounts.google.com", "https://accounts.google.com"}
 
 var maxAgePattern = regexp.MustCompile(`(?:,|^)\s*(?i:max-age)\s*=\s*([^\s,]+)`)
@@ -160,11 +159,21 @@ func findKey(keys Set, token *jwt.JSONWebToken) (*jose.JSONWebKey, error) {
 	return nil, ErrKeyNotFound
 }
 
+// ValidatedGoogleToken stores a parsed and validated Google ID token.
+type ValidatedGoogleToken struct {
+	// The raw token that was validated.
+	IDToken string
+	// The standard JWT claims.
+	StandardClaims jwt.Claims
+	// The parsed Google-specific JWT claims.
+	GoogleClaims GoogleExtraClaims
+}
+
 // ValidateGoogleClaims parses the JWT, verifies its signature and claims, then returns the
-// Google-specific claims.
+// Google-specific claims and the expiration time.
 func ValidateGoogleClaims(
 	keys Set, serializedJWT string, audience string, issuers []string,
-) (*GoogleExtraClaims, error) {
+) (*ValidatedGoogleToken, error) {
 	token, err := jwt.ParseSigned(serializedJWT)
 	if err != nil {
 		return nil, err
@@ -175,16 +184,16 @@ func ValidateGoogleClaims(
 	if err != nil {
 		return nil, err
 	}
-	standardClaims := &jwt.Claims{}
-	extraClaims := &GoogleExtraClaims{}
-	err = token.Claims(key, standardClaims, extraClaims)
+
+	validatedToken := &ValidatedGoogleToken{IDToken: serializedJWT}
+	err = token.Claims(key, &validatedToken.StandardClaims, &validatedToken.GoogleClaims)
 	if err != nil {
 		return nil, err
 	}
 
 	// try all the issuers; return the last error
 	for _, issuer := range issuers {
-		err = standardClaims.Validate(jwt.Expected{
+		err = validatedToken.StandardClaims.Validate(jwt.Expected{
 			Audience: jwt.Audience{audience},
 			Issuer:   issuer,
 			Time:     time.Now(),
@@ -196,5 +205,5 @@ func ValidateGoogleClaims(
 	if err != nil {
 		return nil, err
 	}
-	return extraClaims, nil
+	return validatedToken, nil
 }

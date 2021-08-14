@@ -30,10 +30,10 @@ func TestAuthenticatedRequest(t *testing.T) {
 
 func TestTokenInfo(t *testing.T) {
 	// Configure a fake tokeninfo server
-	accessTokenParam := ""
+	idTokenParam := ""
 	const tokenInfoResponse = "token_info_response"
 	tokenInfoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		accessTokenParam = r.URL.Query().Get("access_token")
+		idTokenParam = r.URL.Query().Get("id_token")
 		w.Write([]byte(tokenInfoResponse))
 	}))
 	defer tokenInfoServer.Close()
@@ -53,7 +53,7 @@ func TestTokenInfo(t *testing.T) {
 	if !bytes.Contains(body, []byte(tokenInfoResponse)) {
 		t.Error("Body does not contain tokeninfo response:", string(body))
 	}
-	if accessTokenParam != "fake_access_token" {
-		t.Error("incorrect access token param:", accessTokenParam)
+	if idTokenParam == "" {
+		t.Error("should have sent ID token, was empty")
 	}
 }

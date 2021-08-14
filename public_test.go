@@ -23,7 +23,7 @@ type fixture struct {
 
 func newFixture() *fixture {
 	f := &fixture{
-		googlesignin.New(signintest.ClientID, "/loggedin"),
+		googlesignin.New(signintest.ClientID),
 		nil,
 	}
 	f.a.HostedDomain = insecureTestDomain
@@ -73,7 +73,7 @@ func TestAuthenticatedHandler(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	authenticatedHandler.ServeHTTP(recorder, r)
 	location := recorder.Header().Get("Location")
-	if calledRequest != nil || !(recorder.Code == http.StatusSeeOther && location == "/__start_signin#/hello?param=1") {
+	if calledRequest != nil || !(recorder.Code == http.StatusSeeOther && location == "/__start_signin") {
 		t.Error("expected redirect:", recorder.Code, location)
 	}
 	postR := httptest.NewRequest(http.MethodPost, "/hello", nil)
@@ -93,7 +93,6 @@ func TestAuthenticatedHandler(t *testing.T) {
 	calledRequest = nil
 
 	// the sign in path must be public
-	f.a.ExtraScopes = "extra_scope"
 	r.URL.Scheme = "https"
 	r.URL.Path = "/__start_signin"
 	recorder = httptest.NewRecorder()
@@ -102,8 +101,8 @@ func TestAuthenticatedHandler(t *testing.T) {
 		t.Error("expected succesful request for sign in:", recorder.Code)
 	}
 	body, _ := ioutil.ReadAll(recorder.Result().Body)
-	if !bytes.Contains(body, []byte("openid email extra_scope")) {
-		t.Error("sign in page should contain scopes", string(body))
+	if !bytes.Contains(body, []byte("https://accounts.google.com/gsi/client")) {
+		t.Error("sign in page should load JS library", string(body))
 	}
 
 	r.URL.Path = "/other"

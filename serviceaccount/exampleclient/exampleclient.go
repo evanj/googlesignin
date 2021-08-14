@@ -13,9 +13,23 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const usageText = `exampleclient
+
+exampleclient sends a request authenticated with a service account.
+It uses Google Application Default Credentials to find a service account.
+Set the GOOGLE_APPLICATION_CREDENTIALS environment variable to the path
+of a JSON key file to set manually.
+
+Flags:
+`
+
 func main() {
 	urlString := flag.String("url", "http://localhost:8080/auth_demo", "URL to send bearer token")
 	audience := flag.String("audience", "", "Audience expected by the target URL")
+	flag.Usage = func() {
+		fmt.Fprint(flag.CommandLine.Output(), usageText)
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 	if *audience == "" {
 		panic("--audience is required")

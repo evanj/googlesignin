@@ -156,7 +156,7 @@ func main() {
 	log.Printf("starting proxy server listening on %s", listen)
 	proxy := httputil.NewSingleHostReverseProxy(parsedDestination)
 
-	authenticator := googlesignin.New(clientID, "/")
+	authenticator := googlesignin.New(clientID)
 	authenticator.RedirectIfNotSignedIn = true
 	authenticator.HostedDomain = hostedDomain
 	authenticatedProxy := authenticator.RequireSignIn(proxy)

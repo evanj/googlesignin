@@ -6,7 +6,7 @@ import (
 )
 
 func TestMakePublic(t *testing.T) {
-	a := New("clientid", "/loggedin")
+	a := New("clientid")
 	a.MakePublic("/")
 	a.MakePublic("/public")
 	a.MakePublic("/publicdir/")

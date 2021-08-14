@@ -227,9 +227,9 @@ func NewAuthenticator(audience string) *Authenticator {
 
 // ValidateToken returns the identity that issued this token (sub), or an error if it is not valid.
 func (a *Authenticator) ValidateToken(jwt string) (string, error) {
-	claims, err := jwkkeys.ValidateGoogleClaims(a.cachedKeys, jwt, a.audience, jwkkeys.GoogleIssuers)
+	validatedToken, err := jwkkeys.ValidateGoogleClaims(a.cachedKeys, jwt, a.audience, jwkkeys.GoogleIssuers)
 	if err != nil {
 		return "", err
 	}
-	return claims.Email, nil
+	return validatedToken.GoogleClaims.Email, nil
 }

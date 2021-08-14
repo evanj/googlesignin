@@ -1,10 +1,10 @@
 # Google Sign-In
 
-This library provides Go HTTP middleware to require Google Sign-In in a web application, and/or to use the Google Cloud Identity Aware Proxy. This library tries to be as easy to use as possible, and to use secure defaults. It verifies ID tokens on the server side using Google's public keys and [Square's go-jose library](https://github.com/square/go-jose). It requires users to be logged in for all endpoints, except endpoints that are explicitly made public. This is particularly useful for "internal" applications that should be available to users in your domain, but not the public. Just use the `RequiresSignIn` wrapper for all your endpoints, set the `HostedDomain` argument, and you are done! This version cannot be used to request OAuth2 access tokens, at least as of 2021-08-13. Use the `googlesignin/oauth2` version of this API for that.
+This library provides Go HTTP middleware to require Google Sign-In in a web application, and/or to use the Google Cloud Identity Aware Proxy. This library tries to be as easy to use as possible, and to use secure defaults. It verifies ID tokens on the server using Google's public keys and [Square's go-jose library](https://github.com/square/go-jose). It requires users to be logged in for all endpoints, except endpoints that are explicitly made public. This is particularly useful for "internal" applications that should be available to users in your domain, but not the public. Just use the `RequiresSignIn` wrapper for all your endpoints, set the `HostedDomain` argument, and you are done! This version cannot be used to request OAuth2 access tokens, at least as of 2021-08-13. Use the `googlesignin/oauth2` version of this API if you need access tokens.
 
-I've also added some preliminary support for the [GCP Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview), and authenticating requests using Google Cloud Service accounts as both a client and server.
+This library also supports the [GCP Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview), and authenticating requests using Google Cloud Service accounts as both a client and server.
 
-Google previously recommended web applications use [the "Sign In With Google" JavaScript library, also known as "Google Sign-In Javascript Platform Library"](https://developers.google.com/identity/sign-in/web/). I initially wrote this because I was curious how it compares to the older OAuth redirect approach. In [August 2021, Google announced that this library will stop working after March 2023](https://developers.googleblog.com/2021/08/gsi-jsweb-deprecation.html). This library was updated at that time to the newer [Google Identity Services](https://developers.google.com/identity/gsi/web).
+Google previously recommended web applications use [the Google Sign-In Javascript Platform Library](https://developers.google.com/identity/sign-in/web/). I initially wrote this because I was curious how it compares to the older OAuth2 redirect approach. In [August 2021, Google announced that this library will stop working after March 2023](https://developers.googleblog.com/2021/08/gsi-jsweb-deprecation.html). This library was updated at that time to the newer [Google Identity Services](https://developers.google.com/identity/gsi/web).
 
 
 ## Example
@@ -21,14 +21,14 @@ To run it yourself:
 
 ## Design Overview / Notes
 
-This calls the Google Sign-In JavaScript API and saves the resulting ID token and optionally the access token in a cookie. Malicious JavaScript running on the site could steal these cookie, but they are time limited, so this seems basically as good as setting a a session cookie. It might be slightly better to expose an endpoint that saves them as an encrypted blob in an HTTPOnly cookie.
+This uses the Google Identity Service HTML API and saves the resulting ID token in a cookie. This is an HTTPOnly cookie, so it can only be accessed on the server. Even if it leaks, it is time limited, and scoped to the OAuth2 Client ID that was requested, so it can't really be used for much else.
 
-The Go handler requires these cookies to be set, and validates the ID token on each request. If it is invalid, permission is denied or it redirects to the sign in page. If the token can be refreshed, it is refreshed by the JavaScript, then it redirects back to the original page. The original URL is embedded in the sign in page's `#` hash, and is saved in `sessionStorage` if it needs to redirect to the sign in page.
+The Go handler requires this cookie to be set, and validates the ID token on each request. If it is invalid, permission is denied or it redirects to the sign in page. The original URL is saved in a cookie so the sign in page can redirect when it receives the response from Google.
 
 
 ## Identity-Aware Proxy
 
-The Google Cloud Identity-Aware Proxy lets you control access to web applications using Google's built-in access control. This package provides HTTP middleware to verify the signed header and extract the email address. This performs the same function as the googlesignin package, but for applications using IAP. This repository contains an example. It is running https://goiap-demo.appspot.com/, but you won't be able to access it (sorry!). This is simpler and probably more secure than relying on Google Sign-In, but only works on Google Cloud.
+The Google Cloud Identity-Aware Proxy lets you control access to web applications using Google's built-in access control. This package provides HTTP middleware to verify the signed header and extract the email address. This performs the same function as the googlesignin package, but for applications using IAP. This repository contains an example. It is running at https://goiap-demo.uc.r.appspot.com, but you won't be able to access it (sorry!). This is simpler and probably more secure than relying on Google Sign-In, but only works on Google Cloud.
 
 ### Simulate the Identity-Aware Proxy
 

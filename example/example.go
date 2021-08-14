@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -99,7 +99,7 @@ func (s *server) idTokenPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	err2 := resp.Body.Close()
 	if err != nil {
 		panic(err)

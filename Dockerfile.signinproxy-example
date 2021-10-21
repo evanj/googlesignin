@@ -2,25 +2,25 @@
 # docker build . -f Dockerfile.signinproxy-example
 
 # Go build image
-FROM golang:1.16.7-buster AS go_builder
+FROM golang:1.17.2-bullseye AS go_builder
 COPY . /go/src/github.com/evanj/googlesignin
 WORKDIR /go/src/github.com/evanj/googlesignin
 RUN go build -o /go/bin/signinproxy -v ./signinproxy
 
 # Download pip: Debian's default Python 3 does not include pip
-FROM golang:1.16.7-buster AS pip_downloader
-RUN curl --location https://github.com/pypa/pip/archive/21.2.3.tar.gz | tar -xvzf - --directory=/
+FROM golang:1.17.2-bullseye AS pip_downloader
+RUN curl --location https://github.com/pypa/pip/archive/21.3.tar.gz | tar -xvzf - --directory=/
 
 # Download Python dependencies
 # We save about ~13 MiB in image size by NOT creating a virtualenv
-FROM gcr.io/distroless/python3-debian10:latest AS py_dependencies
-COPY --from=pip_downloader /pip-21.2.3 /pip
+FROM gcr.io/distroless/python3-debian11:latest AS py_dependencies
+COPY --from=pip_downloader /pip-21.3 /pip
 COPY signinproxy/example/requirements.txt /
 ENV PYTHONPATH=/pip/src
 RUN python3 -m pip install -r /requirements.txt --target=/app
 
 # Runtime image
-FROM gcr.io/distroless/python3-debian10:latest
+FROM gcr.io/distroless/python3-debian11:latest
 COPY --from=go_builder /go/bin/signinproxy /
 COPY --from=py_dependencies /app /app
 COPY signinproxy/example/*.py /app

@@ -1,8 +1,12 @@
 #!/bin/bash
 # Continuous integration checks
 
-set -x -euf -o pipefail
+set -euf -o pipefail
 
+# echo commands
+set -x
+
+# Run tests
 go test -race -count=10 ./...
 
 # go test only checks some vet warnings; check all

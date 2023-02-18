@@ -7,8 +7,8 @@ import (
 
 	"github.com/evanj/googlesignin"
 	"github.com/evanj/googlesignin/jwkkeys"
-	jose "github.com/square/go-jose/v3"
-	"github.com/square/go-jose/v3/jwt"
+	jose "github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v3/jwt"
 )
 
 // ClientID is a fake OAuth client ID to be used with googlesignin.Authenticator in tests.

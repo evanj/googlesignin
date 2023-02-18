@@ -14,12 +14,12 @@ go vet ./...
 
 # cd /tmp to not change go.mod/go.sum ; TODO: Use tools.go:
 # https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
-(cd /tmp && go get golang.org/x/tools/cmd/goimports golang.org/x/lint/golint honnef.co/go/tools/cmd/staticcheck)
-golint --set_exit_status ./...
+go install honnef.co/go/tools/cmd/staticcheck@latest
 staticcheck --checks=all ./...
 
-# require that we use goimports and go mod tidy. TODO: there must be an easier way?
-go list ./... | sed 's|github.com/evanj/googlesignin|.|' | xargs goimports -w
+go fmt ./...
+
+# require that we use go fmt and go mod tidy. TODO: there must be an easier way?
 go mod tidy
 CHANGED=$(git status --porcelain --untracked-files=no)
 if [ -n "${CHANGED}" ]; then

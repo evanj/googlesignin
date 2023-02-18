@@ -1,5 +1,5 @@
 # Go build image
-FROM golang:1.17.2-bullseye AS go_builder
+FROM golang:1.20.1-bullseye AS go_builder
 COPY . /go/src/cloudrundebug
 WORKDIR /go/src/cloudrundebug
 RUN go mod init github.com/evanj/googlesignin/cloudrundebug && \

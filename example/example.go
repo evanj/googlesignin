@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -99,7 +99,7 @@ func (s *server) idTokenPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	err2 := resp.Body.Close()
 	if err != nil {
 		panic(err)
@@ -185,5 +185,6 @@ func main() {
 		handler = addLogMiddleware(handler)
 		log.Println("enabling verbose logging")
 	}
+	log.Printf("listening on port %s ...", port)
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

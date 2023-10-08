@@ -3,13 +3,12 @@ package serviceaccount
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
-
 	"testing"
 
 	"golang.org/x/oauth2/google"
@@ -35,13 +34,10 @@ func setEnvAndCleanUp(key string, value string) func() {
 }
 
 func TestNewSourceFromDefault(t *testing.T) {
-	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile (and clean up after)
-	f, err := ioutil.TempFile("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(f.Name())
-	defer setEnvAndCleanUp(googleCredentialsEnvVar, f.Name())()
+	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile
+	tempDir := t.TempDir()
+	tempCredentialsPath := filepath.Join(tempDir, "tempcredentials")
+	defer setEnvAndCleanUp(googleCredentialsEnvVar, tempCredentialsPath)()
 	defer setEnvAndCleanUp(gceMetadataHostEnv, "doesnotexist.example.com")()
 
 	tests := []struct {
@@ -54,7 +50,7 @@ func TestNewSourceFromDefault(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		err = ioutil.WriteFile(f.Name(), []byte(test.credentialData), 0600)
+		err := os.WriteFile(tempCredentialsPath, []byte(test.credentialData), 0600)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,16 +68,12 @@ func TestNewSourceFromDefault(t *testing.T) {
 
 func TestSourceFromDefaultComputeEngine(t *testing.T) {
 	// set HOME to a temp dir: causes FindDefaultCredentials to not find gcloud credentials (if any)
-	tempdir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempdir)
-	defer setEnvAndCleanUp("HOME", tempdir)()
+	tempDir := t.TempDir()
+	defer setEnvAndCleanUp("HOME", tempDir)()
 	// make FindDefaultCredentials think we are on compute engine
 	defer setEnvAndCleanUp(gceMetadataHostEnv, "doesnotexist.example.com")()
 
-	_, err = sourceFromDefault(context.Background(), "audience", "url")
+	_, err := sourceFromDefault(context.Background(), "audience", "url")
 	if err != ErrComputeEngineNotSupported {
 		t.Error(err)
 	}
@@ -97,14 +89,14 @@ func TestTokenSource(t *testing.T) {
 	}))
 	defer testServer.Close()
 
-	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile (and clean up after)
-	f, err := ioutil.TempFile("", "")
+	// set GOOGLE_APPLICATION_CREDENTIALS to a tempfile
+	tempDir := t.TempDir()
+	tempCredentialsPath := filepath.Join(tempDir, "tempcredentials")
+	defer setEnvAndCleanUp(googleCredentialsEnvVar, tempCredentialsPath)()
+	err := os.WriteFile(tempCredentialsPath, []byte(expiredServiceKey), 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
-	defer setEnvAndCleanUp(googleCredentialsEnvVar, f.Name())()
-	f.Write([]byte(expiredServiceKey))
 
 	// generate an id token that at least parses
 	config, err := google.JWTConfigFromJSON([]byte(expiredServiceKey))

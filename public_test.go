@@ -3,7 +3,7 @@ package googlesignin_test
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,7 +100,10 @@ func TestAuthenticatedHandler(t *testing.T) {
 	if calledRequest != nil || recorder.Code != http.StatusOK {
 		t.Error("expected succesful request for sign in:", recorder.Code)
 	}
-	body, _ := ioutil.ReadAll(recorder.Result().Body)
+	body, err := io.ReadAll(recorder.Result().Body)
+	if err != nil {
+		t.Error("body read failed:", err.Error())
+	}
 	if !bytes.Contains(body, []byte("https://accounts.google.com/gsi/client")) {
 		t.Error("sign in page should load JS library", string(body))
 	}

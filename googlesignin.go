@@ -385,20 +385,22 @@ type signInValues struct {
 	SignInPostAbsoluteURL string
 }
 
-// TODO: Make auto-select an option?
+// The new sign in page *must* display the button that is clicked
 var signInTemplate = template.Must(template.New("signin").Parse(`<!doctype html><html><head>
 <title>Sign In With Google</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://accounts.google.com/gsi/client" async></script>
 </head>
 <body>
 <div id="g_id_onload"
 	data-client_id="{{.ClientID}}"
 	data-login_uri="{{.SignInPostAbsoluteURL}}"
-	data-prompt_parent_id="g_id_onload"
-	data-cancel_on_tap_outside="false"
 	data-ux_mode="redirect"
+	data-auto_prompt="false"
 	data-auto_select="true">
 </div>
+
+<div class="g_id_signin" data-type="standard"></div>
+
 </body></html>
 `))
 

@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,7 +22,10 @@ func TestAuthenticatedRequest(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Error("expected OK:", w.Code)
 	}
-	body, _ := ioutil.ReadAll(w.Result().Body)
+	body, err := io.ReadAll(w.Result().Body)
+	if err != nil {
+		t.Error("body read failed:", err.Error())
+	}
 	if !bytes.Contains(body, []byte("user@example.com")) {
 		t.Error("Body does not contain user's email:", string(body))
 	}
@@ -49,7 +52,11 @@ func TestTokenInfo(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Error("expected OK:", w.Code)
 	}
-	body, _ := ioutil.ReadAll(w.Result().Body)
+
+	body, err := io.ReadAll(w.Result().Body)
+	if err != nil {
+		t.Error("body read failed:", err.Error())
+	}
 	if !bytes.Contains(body, []byte(tokenInfoResponse)) {
 		t.Error("Body does not contain tokeninfo response:", string(body))
 	}

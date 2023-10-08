@@ -4,7 +4,12 @@ This library provides Go HTTP middleware to require Google Sign-In in a web appl
 
 This library also supports the [GCP Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview), and authenticating requests using Google Cloud Service accounts as both a client and server.
 
-Google previously recommended web applications use [the Google Sign-In Javascript Platform Library](https://developers.google.com/identity/sign-in/web/). I initially wrote this because I was curious how it compares to the older OAuth2 redirect approach. In [August 2021, Google announced that this library will stop working after March 2023](https://developers.googleblog.com/2021/08/gsi-jsweb-deprecation.html). This library was updated at that time to the newer [Google Identity Services](https://developers.google.com/identity/gsi/web).
+Google previously recommended web applications use [the Google Sign-In Javascript Platform Library](https://developers.google.com/identity/sign-in/web/). I initially wrote this because I was curious how it compares to the older OAuth2 redirect approach. In [August 2021, Google announced that this library will stop working after March 2023](https://developers.googleblog.com/2021/08/gsi-jsweb-deprecation.html). This library was updated at that time to the newer [Google Identity Services](https://developers.google.com/identity/gsi/web). Unfortunately, this seems to not permit a sign in without a click on Google's button at this time. It would probably be better to use the old-fashioned Google OAuth instead.
+
+#### TODO/Bugs
+
+* Figure out how to fix the redirect behavior.
+* Correctly remember the page to return to on sign in. This breaks the IAP proxy demo.
 
 
 ## Example

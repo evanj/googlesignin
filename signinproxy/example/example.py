@@ -3,13 +3,12 @@ import flask
 import os
 import sys
 import logging
-import werkzeug
+import werkzeug.wrappers
 
 _IAP_EMAIL_HEADER_ENV_KEY = 'HTTP_X_GOOG_AUTHENTICATED_USER_EMAIL'
 _IAP_EMAIL_HEADER = 'X-Goog-Authenticated-User-Email'
 _IAP_VALUE_PREFIX = 'accounts.google.com:'
 
-_FORBIDDEN_RESPONSE = werkzeug.Response()
 
 class RequireSignInProxyMiddleware(object):
     """
@@ -26,7 +25,7 @@ class RequireSignInProxyMiddleware(object):
 
     def __call__(self, environ, start_response):
         def make_forbidden_response():
-            response = werkzeug.wrappers.BaseResponse('Forbidden', status=403)
+            response = werkzeug.wrappers.Response('Forbidden', status=403)
             return response(environ, start_response)
 
         remote_addr = environ.get('REMOTE_ADDR', '')
@@ -86,6 +85,5 @@ app = create_app()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    print('xxx', logging.root, logging.root.level)
     logging.info('running debug flask server ...')
     app.run(debug=True)
